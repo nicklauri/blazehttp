@@ -22,6 +22,9 @@ pub enum BlazeError {
     #[error("Invalid method")]
     InvalidMethod,
 
+    #[error("Invalid HTTP version")]
+    InvalidVersion,
+
     #[error("Internal error")]
     InternalError,
 

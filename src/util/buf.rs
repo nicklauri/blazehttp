@@ -70,7 +70,7 @@ impl<'a> Buf<'a> {
     }
 
     #[inline]
-    pub fn advance(&mut self, offset: usize) {
+    pub fn advance(&mut self, offset: usize) -> &Self {
         let new_len = self.data_len.saturating_sub(offset);
 
         if offset < self.data_len {
@@ -78,5 +78,7 @@ impl<'a> Buf<'a> {
         }
 
         self.data_len = new_len;
+
+        self
     }
 }
