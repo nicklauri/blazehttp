@@ -2,8 +2,9 @@ use std::{mem::MaybeUninit, net::SocketAddr, ops::ControlFlow};
 
 use anyhow::{anyhow, bail, Context, Result};
 use http::{
-    header::HeaderName, method::InvalidMethod, HeaderMap, HeaderValue, Method,
-    Request as HttpRequest, Uri, Version,
+    header::{self, HeaderName},
+    method::InvalidMethod,
+    HeaderMap, HeaderValue, Method, Request as HttpRequest, Uri, Version,
 };
 use httparse::{Header, Request as HttparseRequest, Status};
 use tokio::{
@@ -40,26 +41,44 @@ impl H1Connection {
     }
 
     pub async fn handle_connection(mut self) -> Result<()> {
-        let content = "Hello world!";
-        let len = content.len();
-        let response_text = format!(
-            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
-            len, content
-        );
-
-        // If buffer is configurable in the future, these will be changed into Vec<u8>
-        let buf = &mut [0u8; 8 * 1024];
-        let mut buf = Buf::from_slice(buf);
-
-        println!("Hello");
         loop {
-            let res = buf.fill(&mut self.stream).await;
+            // Note: should handle every errors then send appropriate error page.
+            let mut request = self.read_request().await?;
+
+            println!("{:?}", request);
+
+            self.stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await?;
+
+            if let Some(conn) = request.headers().get(header::CONNECTION) {
+                if conn.as_bytes().eq_ignore_ascii_case(b"keep-alive") {
+                    println!("Detected keep-alive connection from {}", self.addr);
+                    continue;
+                }
+            }
+            println!(
+                "No keep-alive header from {}. Closing connection",
+                self.addr
+            );
+            break;
+        }
+
+        self.stream.shutdown().await?;
+
+        Ok(())
+    }
+
+    pub async fn read_request(&mut self) -> Result<Request> {
+        let mut buf = Buf::with_capacity(8 * 1024);
+
+        loop {
+            buf.fill(&mut self.stream).await?;
 
             if buf.is_empty() {
-                break;
+                bail!(BlazeError::Eof)
             }
 
-            // TODO: move these to util.
+            dbg!(buf.get_buf().len());
+
             let reqbuf = buf.get_buf();
             let mut header: [MaybeUninit<Header>; 20] =
                 unsafe { MaybeUninit::uninit().assume_init() };
@@ -70,24 +89,22 @@ impl H1Connection {
                     if buf.is_full() {
                         // The buff is fulled but header is still incomplete.
                         // Not supported!
-                        bail!(BlazeError::NotEnoughSpace)
+
+                        bail!(BlazeError::RequestHeaderTooLarge)
                     }
-                    continue
-                },
+                    continue;
+                }
                 Err(err) => Err(err).blaze_error()?,
             };
 
-            // Debug write, eventually write HttpBody to stream.
-            self.stream.write_all(response_text.as_bytes()).await?;
-
             let mut request = map_to_http_request(&hreq)?;
 
-            let body = buf.advance(parsed_size).get_buf().to_vec();
+            buf.advance(parsed_size);
 
-            *request.body_mut() = HttpBody::Bytes(body);
+            *request.body_mut() = HttpBody::Bytes(buf.to_vec());
+
+            return Ok(request);
         }
-
-        Ok(())
     }
 }
 
@@ -129,7 +146,7 @@ fn get_version(hreq: &HttparseRequest, req: &mut Request) -> Result<()> {
         .and_then(|v| match v {
             0 => Ok(Version::HTTP_10),
             1 => Ok(Version::HTTP_11),
-            _ => Err(BlazeError::InvalidVersion)    // Note: httparse doesn't parse 0.9 or 2.0, 3.0
+            _ => Err(BlazeError::InvalidVersion), // Note: httparse doesn't parse 0.9 or 2.0, 3.0
         })?;
     Ok(())
 }
@@ -137,12 +154,14 @@ fn get_version(hreq: &HttparseRequest, req: &mut Request) -> Result<()> {
 #[inline]
 fn get_headers(hreq: &HttparseRequest, req: &mut Request) -> Result<()> {
     let header_iter = hreq.headers.iter().map(|h| (h.name, h.value));
-    let header_map_cap = hreq.headers.len();
-    let mut header_maps = HeaderMap::with_capacity(header_map_cap);
+    let header_count = hreq.headers.len();
+    let mut header_maps = HeaderMap::with_capacity(header_count);
 
     for (name, value) in header_iter {
-        let header_name = HeaderName::from_bytes(name.as_bytes())?;
-        let header_value = HeaderValue::from_bytes(value)?;
+        let header_name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|_| BlazeError::InvalidHeaderName(name.to_string()))?;
+        let header_value =
+            HeaderValue::from_bytes(value).or(Err(BlazeError::InvalidHeaderValue))?;
 
         header_maps.append(header_name, header_value);
     }

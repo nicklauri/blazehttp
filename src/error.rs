@@ -25,14 +25,20 @@ pub enum BlazeError {
     #[error("Invalid HTTP version")]
     InvalidVersion,
 
+    #[error("Invalid header name: {0}")]
+    InvalidHeaderName(String),
+
+    #[error("Invalid header value")]
+    InvalidHeaderValue,
+
     #[error("Internal error")]
     InternalError,
 
     #[error("Reached end of file")]
     Eof,
 
-    #[error("Not enough space")]
-    NotEnoughSpace,
+    #[error("Request header too large")]
+    RequestHeaderTooLarge,
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),
