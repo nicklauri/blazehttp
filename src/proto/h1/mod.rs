@@ -47,7 +47,7 @@ impl H1Connection {
 
             println!("{:?}", request);
 
-            self.stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await?;
+            self.stream.write_all(b"HTTP/1.1 200 OK\nconnection: close\r\n\r\n").await?;
 
             if let Some(conn) = request.headers().get(header::CONNECTION) {
                 if conn.as_bytes().eq_ignore_ascii_case(b"keep-alive") {

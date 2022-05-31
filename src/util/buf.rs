@@ -7,7 +7,7 @@ use crate::error::{BlazeError, BlazeErrorExt, BlazeResult};
 /// Convenient wrapper type for buffer slice.
 #[derive(Debug)]
 pub struct Buf {
-    data: Vec<u8>,
+    data: Box<[u8]>,
     pos: usize,
 }
 
@@ -24,14 +24,25 @@ impl Buf {
             data.set_len(capacity);
         }
 
+        let data = data.into_boxed_slice();
+
         Self { data, pos: 0 }
     }
 
+    /// Construct from a vector.
     #[inline]
-    pub fn from_vec(vec: Vec<u8>) -> Self {
+    pub fn from_vec(mut vec: Vec<u8>) -> Self {
+        if vec.len() < vec.capacity() {
+            unsafe {
+                vec.set_len(vec.capacity());
+            }
+        }
+
+        let data = vec.into_boxed_slice();
+
         Self {
-            pos: vec.len(),
-            data: vec,
+            pos: data.len(),
+            data,
         }
     }
 
@@ -40,8 +51,8 @@ impl Buf {
         self.pos = 0;
     }
 
-    #[inline]
     /// Fill buffer with `reader: R`. If the buffer is full, error `BlazeError::RequestHeaderTooLarge` will be returned.
+    #[inline]
     pub async fn fill<R>(&mut self, reader: &mut R) -> Result<()>
     where
         R: AsyncReadExt + Unpin,
@@ -85,11 +96,11 @@ impl Buf {
 
     #[inline]
     pub fn is_full(&self) -> bool {
-        self.pos >= self.data.capacity()
+        self.pos >= self.data.len()
     }
 
     #[inline]
-    pub fn buf_size(&self) -> usize {
+    pub fn buf_capacity(&self) -> usize {
         self.data.len()
     }
 
@@ -98,9 +109,9 @@ impl Buf {
         self.pos
     }
 
-    #[inline]
     /// Truncate buffer from the left to the offset.<br/>
     /// If `offset` is greater than the amount of data, clear all data.
+    #[inline]
     pub fn advance(&mut self, offset: usize) -> &Self {
         let new_len = self.pos.saturating_sub(offset);
 
@@ -113,10 +124,24 @@ impl Buf {
         self
     }
 
-    #[inline]
     /// Consume self and return unlying vector.
+    #[inline]
     pub fn to_vec(mut self) -> Vec<u8> {
-        self.data.truncate(self.pos);
-        self.data
+        let vec_len = if self.pos <= self.data.len() { self.pos } else { 0 };
+        let mut vec = self.data.to_vec();
+        
+        unsafe {
+            vec.set_len(vec_len);
+        }
+
+        vec
     }
+}
+
+#[cfg(test)]
+mod test {
+    // case: empty buf
+    // case: full buf error
+    // case: advance
+    // case: to vec
 }
