@@ -47,11 +47,7 @@ impl Server {
     pub async fn serve(mut self) -> Result<()> {
         let server_addr = {
             let config = self.config.read();
-            if let Some(ref addr) = config.addr {
-                format!("{}:{}", addr, config.port)
-            } else {
-                format!("localhost:{}", config.port)
-            }
+            format!("{}:{}", config.addr, config.port)
         };
 
         let mut server = TcpListener::bind(server_addr).await?;
