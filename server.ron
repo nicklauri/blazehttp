@@ -1,0 +1,12 @@
+(
+    port: 8080,
+    scheme: https,
+    pattern: [
+        (
+            pattern: All,
+            headers: [
+                ("server", "blazeHTTP 1.1")
+            ]
+        ),
+    ],
+)

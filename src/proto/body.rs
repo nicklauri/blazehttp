@@ -3,6 +3,7 @@ pub enum HttpBody {
     Stream,
     File,
     Bytes(Vec<u8>),
+    Chunked,
     Empty,
 }
 

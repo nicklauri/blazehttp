@@ -2,7 +2,10 @@ use anyhow::{anyhow, bail, Result};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::error::{BlazeError, BlazeErrorExt, BlazeResult};
+use crate::{
+    err,
+    error::{BlazeError, BlazeErrorExt, BlazeResult},
+};
 
 /// Convenient wrapper type for buffer slice.
 #[derive(Debug)]
@@ -53,21 +56,19 @@ impl Buf {
 
     /// Fill buffer with `reader: R`. If the buffer is full, error `BlazeError::RequestHeaderTooLarge` will be returned.
     #[inline]
-    pub async fn fill<R>(&mut self, reader: &mut R) -> Result<()>
+    pub async fn fill<R>(&mut self, reader: &mut R) -> BlazeResult<()>
     where
         R: AsyncReadExt + Unpin,
     {
         if self.is_full() {
-            bail!(BlazeError::RequestHeaderTooLarge);
+            err!(BlazeError::RequestHeaderTooLarge);
         }
 
         let writable_buf = &mut self.data[self.pos..];
 
         let amount = reader.read(writable_buf).await.blaze_error()?;
 
-        if amount == 0 && self.pos == 0 {
-            bail!(BlazeError::Eof);
-        }
+        err!(amount == 0, BlazeError::Eof);
 
         self.pos += amount;
 
@@ -75,7 +76,7 @@ impl Buf {
     }
 
     #[inline]
-    pub fn get_buf(&self) -> &[u8] {
+    pub fn filled(&self) -> &[u8] {
         &self.data[..self.pos]
     }
 
@@ -127,9 +128,13 @@ impl Buf {
     /// Consume self and return unlying vector.
     #[inline]
     pub fn to_vec(mut self) -> Vec<u8> {
-        let vec_len = if self.pos <= self.data.len() { self.pos } else { 0 };
+        let vec_len = if self.pos <= self.data.len() {
+            self.pos
+        } else {
+            0
+        };
         let mut vec = self.data.to_vec();
-        
+
         unsafe {
             vec.set_len(vec_len);
         }
@@ -140,8 +145,85 @@ impl Buf {
 
 #[cfg(test)]
 mod test {
-    // case: empty buf
-    // case: full buf error
-    // case: advance
-    // case: to vec
+    use std::time::Duration;
+
+    use tokio::time::{self, error::Elapsed};
+    use tokio_test::io::Builder;
+
+    use crate::error::BlazeError;
+
+    use super::Buf;
+
+    #[tokio::test]
+    async fn fill_buf_twice() {
+        let mut mock = Builder::new().read(b"hello").read(b"world").build();
+
+        const MAX_CAP: usize = 10;
+        let mut buf = Buf::with_capacity(MAX_CAP);
+
+        assert!(buf.is_empty());
+        assert_eq!(buf.buf_capacity(), MAX_CAP);
+
+        let res = buf.fill(&mut mock).await;
+
+        assert!(res.is_ok());
+
+        assert_eq!(buf.filled(), &b"hello"[..]);
+
+        let res = buf.fill(&mut mock).await;
+
+        assert!(res.is_ok());
+
+        assert_eq!(buf.filled(), &b"helloworld"[..]);
+    }
+
+    #[tokio::test]
+    async fn fill_to_eof() {
+        let mut mock = Builder::new()
+            .read(b"hello")
+            .read(b"world")
+            .read(b"another")
+            .read(b"test")
+            .build();
+
+        const MAX_CAP: usize = 1024;
+        let mut buf = Buf::with_capacity(MAX_CAP);
+
+        assert!(buf.is_empty());
+        assert_eq!(buf.buf_capacity(), MAX_CAP);
+
+        loop {
+            let fut = buf.fill(&mut mock);
+            let timeout_res = time::timeout(Duration::from_secs(1), fut).await;
+
+            assert!(
+                timeout_res.is_ok(),
+                "read operation took longer time than expected"
+            );
+
+            let res = timeout_res.unwrap();
+
+            match res {
+                Ok(()) => {}
+                Err(BlazeError::Eof) => break,
+                Err(err) => assert!(false, "read operations expect only success, error: {err:?}"),
+            }
+        }
+
+        assert_eq!(buf.filled(), &b"helloworldanothertest"[..]);
+    }
+
+    #[tokio::test]
+    async fn advance_buf() {
+        let mut mock = Builder::new()
+            .read(b"hello world")
+            .read(b"blaze http")
+            .build();
+
+        const MAX_CAP: usize = 8096;
+        let mut buf = Buf::with_capacity(MAX_CAP);
+    }
+
+    #[tokio::test]
+    async fn fill_full_buf() {}
 }

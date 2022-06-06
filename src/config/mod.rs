@@ -1,11 +1,14 @@
-pub mod pattern;
+pub mod path;
 
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 
+use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-pub type GlobalConfig = Arc<RwLock<Config>>;
+use self::path::Location;
+
+pub type SharedConfig = Arc<Config>;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -20,25 +23,41 @@ pub struct Config {
 
     #[serde(default = "Scheme::default")]
     pub scheme: Scheme,
+
+    #[serde(default)]
+    pub pattern: Vec<Location>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
+impl Config {
+    pub fn default() -> Config {
         Config {
-            ..Default::default()
+            addr: default_addr(),
+            port: default_port(),
+            workers: default_workers(),
+            scheme: Scheme::default(),
+            pattern: Vec::new(),
         }
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum Scheme {
     Http,
     Https,
 }
 
+impl Display for Scheme {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Scheme::Http => "http",
+            Scheme::Https => "https",
+        })
+    }
+}
+
 impl Scheme {
-    pub fn default() -> Self {
+    pub const fn default() -> Self {
         Scheme::Http
     }
 }
@@ -46,7 +65,7 @@ impl Scheme {
 pub const DEFAULT_ADDR: &'static str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 80;
 
-pub fn default_port() -> u16 {
+pub const fn default_port() -> u16 {
     DEFAULT_PORT
 }
 

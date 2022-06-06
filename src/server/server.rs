@@ -1,37 +1,79 @@
-use std::{iter, net::ToSocketAddrs};
+use std::{
+    cell::RefCell,
+    iter,
+    net::ToSocketAddrs,
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc,
+    },
+};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_channel::{unbounded, Sender};
-use tokio::net::TcpListener;
+use h2::server;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
+use tokio::{
+    net::TcpListener,
+    runtime::{Builder, Runtime},
+};
+use tracing::info;
 
 use crate::{
-    config::{Config, GlobalConfig},
+    config::{Config, Scheme, SharedConfig},
     proto::Connection,
     worker::{Command, Worker},
 };
 
 #[derive(Debug)]
 pub struct Server {
-    workers: Vec<Worker>,
+    id: u8,
+    runtime: Runtime,
     sender: Sender<Command>,
-    config: GlobalConfig,
+    config: SharedConfig,
+    server_pool_name: String,
 }
 
 impl Server {
-    pub fn new(config: GlobalConfig) -> Server {
+    pub fn new(config: SharedConfig) -> Result<Server> {
         let (tx, rx) = unbounded();
 
-        let num_workers = config.read().workers;
+        let mut runtime_builder = if config.workers > 1 {
+            let mut multi_thread_builder = Builder::new_multi_thread();
+            multi_thread_builder.worker_threads(config.workers);
+            multi_thread_builder
+        } else {
+            Builder::new_current_thread()
+        };
 
-        let workers = iter::repeat_with(|| Worker::new(rx.clone(), config.clone()))
-            .take(num_workers as _)
-            .collect();
+        let server_id = Server::get_id();
+        let server_pool_name = get_server_name(&*config);
+        let shared_server_name = Arc::new(server_pool_name.clone());
 
-        Self {
-            workers,
+        set_current_server_name(&server_pool_name);
+
+        let runtime = runtime_builder
+            .enable_all()
+            .thread_name(server_pool_name.clone())
+            .thread_name_fn(move || {
+                let name = shared_server_name.clone();
+                get_next_thread_name(&name, server_id as _)
+            })
+            .build()
+            .context("build Tokio runtime failed")?;
+
+        Ok(Self {
+            id: server_id,
+            runtime,
             sender: tx,
             config,
-        }
+            server_pool_name,
+        })
+    }
+
+    fn get_id() -> u8 {
+        static SERVER_ID: AtomicU8 = AtomicU8::new(0);
+        SERVER_ID.fetch_add(1, Ordering::Relaxed)
     }
 
     pub async fn stop(&self) -> Result<()> {
@@ -39,21 +81,18 @@ impl Server {
         Ok(())
     }
 
-    pub fn detect_config_changes(&self) -> bool {
-        false
-    }
-    pub fn apply_config_changes(&self) {}
-
     pub async fn serve(mut self) -> Result<()> {
-        let server_addr = {
-            let config = self.config.read();
-            format!("{}:{}", config.addr, config.port)
+        let (scheme, server_addr) = {
+            let addr = format!("{}:{}", self.config.addr, self.config.port);
+            let scheme = self.config.scheme;
+            (scheme, addr)
         };
 
-        let mut server = TcpListener::bind(server_addr).await?;
+        let mut server = TcpListener::bind(&server_addr).await?;
+
+        info!("listen at {}://{}", scheme, server_addr);
 
         loop {
-            // Detect Ctrl-C.
             match server.accept().await {
                 Ok((stream, addr)) => {
                     let conn = Connection::new_h1(addr, stream);
@@ -61,13 +100,66 @@ impl Server {
                 }
                 Err(_) => {}
             }
-
-            // Separate to serve without detect config changes
-            if self.detect_config_changes() {
-                self.apply_config_changes();
-            }
         }
 
         Ok(())
     }
+}
+
+fn get_server_name(config: &Config) -> String {
+    format!("blaze:{}", config.port)
+}
+
+fn get_next_thread_name(server_name: &str, server_id: usize) -> String {
+    static LAST_WORKER_ID: Lazy<Mutex<Vec<usize>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+    let mut lock = LAST_WORKER_ID.lock();
+    let mut vec = &mut *lock;
+
+    if vec.len() <= server_id {
+        let extend_iter = iter::repeat(0).take(server_id - vec.len());
+
+        vec.extend(extend_iter);
+    }
+
+    let vec_len = vec.len();
+    let mut last_id = vec
+        .get_mut(server_id)
+        .with_context(|| {
+            format!(
+                "get_next_thread_name: out of bound server id: has={} request={}",
+                vec_len, server_id
+            )
+        })
+        .unwrap();
+
+    *last_id += 1;
+
+    let worker_name = format!("{}-worker:{}", server_name, *last_id - 1);
+
+    set_current_server_name(&server_name);
+    set_current_worker_name(&worker_name);
+
+    worker_name
+}
+
+thread_local! {
+    static CURRENT_SERVER_NAME: RefCell<String> = RefCell::new(String::new());
+    static CURRENT_WORKER_NAME: RefCell<String> = RefCell::new(String::new());
+}
+
+pub fn current_worker_name() -> String {
+    CURRENT_WORKER_NAME.with(|name| name.borrow().clone())
+}
+
+pub fn current_server_name() -> String {
+    CURRENT_SERVER_NAME.with(|name| name.borrow().clone())
+}
+
+fn set_current_server_name(server_name: &str) {
+    CURRENT_SERVER_NAME.with(|name| *name.borrow_mut() = server_name.to_string())
+}
+
+fn set_current_worker_name(worker_name: &str) {
+    CURRENT_WORKER_NAME.with(|name| *name.borrow_mut() = worker_name.to_string())
 }

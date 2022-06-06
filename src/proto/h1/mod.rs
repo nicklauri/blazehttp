@@ -2,7 +2,7 @@ use std::{mem::MaybeUninit, net::SocketAddr, ops::ControlFlow};
 
 use anyhow::{anyhow, bail, Context, Result};
 use http::{
-    header::{self, HeaderName},
+    header::{self, HeaderName, CONTENT_LENGTH, EXPECT, TRANSFER_ENCODING},
     method::InvalidMethod,
     HeaderMap, HeaderValue, Method, Request as HttpRequest, Uri, Version,
 };
@@ -12,7 +12,7 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::util::buf::Buf;
+use crate::{err, error::BlazeResult, ok, util::buf::Buf};
 use crate::{
     error::{BlazeError, BlazeErrorExt},
     util,
@@ -33,11 +33,16 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr) {
 pub struct H1Connection {
     stream: TcpStream,
     addr: SocketAddr,
+    info: H1ConnInfo,
 }
 
 impl H1Connection {
     pub fn new(stream: TcpStream, addr: SocketAddr) -> Self {
-        Self { stream, addr }
+        Self {
+            stream,
+            addr,
+            info: H1ConnInfo::default(),
+        }
     }
 
     pub async fn handle_connection(mut self) -> Result<()> {
@@ -47,7 +52,9 @@ impl H1Connection {
 
             println!("{:?}", request);
 
-            self.stream.write_all(b"HTTP/1.1 200 OK\nconnection: close\r\n\r\n").await?;
+            self.stream
+                .write_all(b"HTTP/1.1 200 OK\nconnection: close\r\n\r\n")
+                .await?;
 
             if let Some(conn) = request.headers().get(header::CONNECTION) {
                 if conn.as_bytes().eq_ignore_ascii_case(b"keep-alive") {
@@ -77,9 +84,9 @@ impl H1Connection {
                 bail!(BlazeError::Eof)
             }
 
-            dbg!(buf.get_buf().len());
+            dbg!(buf.filled().len());
 
-            let reqbuf = buf.get_buf();
+            let reqbuf = buf.filled();
             let mut header: [MaybeUninit<Header>; 20] =
                 unsafe { MaybeUninit::uninit().assume_init() };
             let mut hreq = HttparseRequest::new(&mut []);
@@ -169,4 +176,97 @@ fn get_headers(hreq: &HttparseRequest, req: &mut Request) -> Result<()> {
     *req.headers_mut() = header_maps;
 
     Ok(())
+}
+
+#[derive(Debug)]
+pub struct H1ConnInfo {
+    keep_alive: bool,
+    expect_continue: bool,
+    content_length: BodyLen,
+}
+
+impl H1ConnInfo {
+    pub fn default() -> H1ConnInfo {
+        H1ConnInfo {
+            keep_alive: false,
+            expect_continue: false,
+            content_length: BodyLen::Empty,
+        }
+    }
+
+    pub fn fill_info(&mut self, req: &Request) -> BlazeResult<()> {
+        self.check_expect(&req)?;
+        self.get_content_length(&req)?;
+
+        Ok(())
+    }
+
+    fn check_expect(&mut self, req: &Request) -> BlazeResult<()> {
+        let expect_value = match req.headers().get(EXPECT) {
+            Some(val) => val,
+            None => ok!(self.expect_continue = false), // This is just setting self.expect_continue to false and return Ok(())
+        };
+
+        self.expect_continue = expect_value
+            .as_bytes()
+            .eq_ignore_ascii_case(b"100-continue");
+
+        // At this point, self.expect_continue must be true.
+        if !self.expect_continue {
+            err!(BlazeError::BadRequest)
+        }
+
+        Ok(())
+    }
+
+    fn get_content_length(&mut self, req: &Request) -> BlazeResult<()> {
+        const NOT_ALLOWED_BODY_METHODS: &'static [Method] =
+            &[Method::GET, Method::HEAD, Method::OPTIONS, Method::DELETE];
+
+        self.content_length = BodyLen::Empty;
+
+        let headers = req.headers();
+        // Check transfer-encoding as well.
+        if let Some(te) = headers.get(TRANSFER_ENCODING) {
+            let is_chunked = te.as_bytes().eq_ignore_ascii_case(b"chunked");
+            if is_chunked {
+                self.content_length = BodyLen::Chunked;
+            } else {
+            }
+        }
+
+        if let Some(lenstr) = headers.get(CONTENT_LENGTH) {
+            if self.content_length.is_chunked() {
+                // Do something here, because of the conflict.
+            }
+
+            let len = lenstr
+                .to_str()
+                .blaze_error()
+                .and_then(util::transform_error(str::parse::<u64>))?;
+
+            self.content_length = BodyLen::Length(len);
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub enum BodyLen {
+    Empty,
+    Chunked,
+    Length(u64),
+}
+
+impl BodyLen {
+    #[inline]
+    pub fn is_chunked(&self) -> bool {
+        matches!(self, BodyLen::Chunked)
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        matches!(self, BodyLen::Empty)
+    }
 }

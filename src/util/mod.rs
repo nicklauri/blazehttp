@@ -1,5 +1,7 @@
 pub mod buf;
 pub mod functional;
+pub mod macros;
+pub mod num;
 
 pub use functional::*;
 
@@ -10,6 +12,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
 use tokio::task::JoinHandle;
+
+pub use macros::*;
 
 #[inline]
 pub fn next_id() -> usize {

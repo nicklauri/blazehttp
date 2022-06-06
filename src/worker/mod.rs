@@ -14,7 +14,7 @@ use tokio::{
 };
 
 use crate::{
-    config::GlobalConfig,
+    config::SharedConfig,
     proto::{self, Connection},
     util,
 };
@@ -39,7 +39,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new(rx: Receiver<Command>, config: GlobalConfig) -> Worker {
+    pub fn new(rx: Receiver<Command>, config: SharedConfig) -> Worker {
         let worker_id = util::next_id();
 
         let thread = thread::spawn(move || {
