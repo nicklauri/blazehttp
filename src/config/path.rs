@@ -9,7 +9,7 @@ use crate::{error::BlazeError, util};
 
 pub type UriPath<'a> = &'a str;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Location {
     pattern: PathPattern,
 
@@ -44,7 +44,7 @@ impl Location {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub enum PathPattern {
     /// Match all path, this will always return true for any path.
     All,
@@ -87,7 +87,7 @@ impl PathPattern {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub enum ServeMode {
     /// Serve files from system path.<br />
     /// TODO: should check for forbidden path.
@@ -111,7 +111,7 @@ impl ServeMode {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub enum KeepAlive {
     None,
     Duration(Duration),

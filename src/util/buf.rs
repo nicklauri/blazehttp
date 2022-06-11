@@ -1,6 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt};
+use tracing::error;
 
 use crate::{
     err,

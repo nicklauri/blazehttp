@@ -10,7 +10,7 @@ use self::path::Location;
 
 pub type SharedConfig = Arc<Config>;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     #[serde(default = "default_addr")]
     pub addr: String,
@@ -26,6 +26,12 @@ pub struct Config {
 
     #[serde(default)]
     pub pattern: Vec<Location>,
+
+    #[serde(default = "default_tasks_per_worker")]
+    pub max_tasks_per_worker: u32,
+
+    #[serde(default = "default_max_connections_in_waiting")]
+    pub max_connections_in_waiting: usize,
 }
 
 impl Config {
@@ -36,6 +42,8 @@ impl Config {
             workers: default_workers(),
             scheme: Scheme::default(),
             pattern: Vec::new(),
+            max_tasks_per_worker: default_tasks_per_worker(),
+            max_connections_in_waiting: default_max_connections_in_waiting(),
         }
     }
 }
@@ -63,7 +71,9 @@ impl Scheme {
 }
 
 pub const DEFAULT_ADDR: &'static str = "0.0.0.0";
-pub const DEFAULT_PORT: u16 = 80;
+pub const DEFAULT_PORT: u16 = 8000;
+pub const DEFAULT_TASKS_PER_WORKER: u32 = 300_000;
+pub const DEFAULT_MAX_CONNECTION_IN_WAITING: usize = 5000;
 
 pub const fn default_port() -> u16 {
     DEFAULT_PORT
@@ -75,4 +85,12 @@ pub fn default_workers() -> usize {
 
 pub fn default_addr() -> String {
     DEFAULT_ADDR.to_string()
+}
+
+pub fn default_tasks_per_worker() -> u32 {
+    DEFAULT_TASKS_PER_WORKER
+}
+
+pub fn default_max_connections_in_waiting() -> usize {
+    DEFAULT_MAX_CONNECTION_IN_WAITING
 }

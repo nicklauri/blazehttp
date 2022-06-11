@@ -1,0 +1,13 @@
+features:
+    - support HTTP/1.1 over TCP
+    - serve static files
+    - reverse proxy
+    - proxy
+    - support FCGI
+    
+    - support HTTP/1.1 and HTTP/2 over TLS
+    - multiple servers'
+    
+12/06:
+    - write a notify
+    - complete workers and runtime

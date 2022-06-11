@@ -1,10 +1,12 @@
 pub mod buf;
 pub mod functional;
 pub mod macros;
+pub mod notify;
 pub mod num;
 
 pub use functional::*;
 
+use std::cell::RefCell;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -14,6 +16,7 @@ use std::task::{Context, Poll};
 use tokio::task::JoinHandle;
 
 pub use macros::*;
+pub use notify::*;
 
 #[inline]
 pub fn next_id() -> usize {

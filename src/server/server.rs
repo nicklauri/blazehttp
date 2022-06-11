@@ -1,23 +1,27 @@
 use std::{
     cell::RefCell,
+    io::ErrorKind,
     iter,
     net::ToSocketAddrs,
+    rc::Rc,
     sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
     },
+    thread::{self, JoinHandle},
+    time::Duration,
 };
 
-use anyhow::{Context, Result};
-use async_channel::{unbounded, Sender};
-use h2::server;
+use anyhow::{Context, Error, Result};
+use async_channel::Sender;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use tokio::{
     net::TcpListener,
     runtime::{Builder, Runtime},
+    time,
 };
-use tracing::info;
+use tracing::{debug, error, info, warn};
 
 use crate::{
     config::{Config, Scheme, SharedConfig},
@@ -28,46 +32,29 @@ use crate::{
 #[derive(Debug)]
 pub struct Server {
     id: u8,
+    tx: Sender<Command>,
     runtime: Runtime,
-    sender: Sender<Command>,
-    config: SharedConfig,
-    server_pool_name: String,
+    config: Config,
+    workers: Vec<Worker>,
 }
 
 impl Server {
-    pub fn new(config: SharedConfig) -> Result<Server> {
-        let (tx, rx) = unbounded();
-
-        let mut runtime_builder = if config.workers > 1 {
-            let mut multi_thread_builder = Builder::new_multi_thread();
-            multi_thread_builder.worker_threads(config.workers);
-            multi_thread_builder
-        } else {
-            Builder::new_current_thread()
-        };
-
+    pub fn new(config: Config) -> Result<Server> {
+        let (tx, rx) = async_channel::bounded(config.max_connections_in_waiting);
         let server_id = Server::get_id();
-        let server_pool_name = get_server_name(&*config);
-        let shared_server_name = Arc::new(server_pool_name.clone());
+        let config = config;
+        let workers = (0..config.workers)
+            .map(|_| Worker::new(rx.clone(), config.clone()))
+            .collect::<Result<Vec<_>>>()?;
 
-        set_current_server_name(&server_pool_name);
-
-        let runtime = runtime_builder
-            .enable_all()
-            .thread_name(server_pool_name.clone())
-            .thread_name_fn(move || {
-                let name = shared_server_name.clone();
-                get_next_thread_name(&name, server_id as _)
-            })
-            .build()
-            .context("build Tokio runtime failed")?;
+        let runtime = Server::create_server_runtime()?;
 
         Ok(Self {
             id: server_id,
+            tx,
             runtime,
-            sender: tx,
             config,
-            server_pool_name,
+            workers,
         })
     }
 
@@ -76,90 +63,55 @@ impl Server {
         SERVER_ID.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub async fn stop(&self) -> Result<()> {
-        self.sender.send(Command::Stop).await?;
-        Ok(())
+    fn create_server_runtime() -> Result<Runtime> {
+        let rt = Builder::new_current_thread()
+            .enable_all()
+            .thread_name("blaze-server")
+            .build()
+            .context("build Tokio runtime failed")?;
+
+        Ok(rt)
     }
 
-    pub async fn serve(mut self) -> Result<()> {
+    #[inline]
+    async fn send_task(&self, task: Command) -> Result<()> {
+        Ok(self.tx.send(task).await?)
+    }
+
+    pub fn serve(mut self) -> Result<()> {
         let (scheme, server_addr) = {
             let addr = format!("{}:{}", self.config.addr, self.config.port);
             let scheme = self.config.scheme;
             (scheme, addr)
         };
 
-        let mut server = TcpListener::bind(&server_addr).await?;
+        self.runtime.block_on(async {
+            let mut server = TcpListener::bind(&server_addr).await?;
 
-        info!("listen at {}://{}", scheme, server_addr);
-
-        loop {
-            match server.accept().await {
-                Ok((stream, addr)) => {
-                    let conn = Connection::new_h1(addr, stream);
-                    self.sender.send(Command::ProcessRequest(conn)).await;
+            info!("listen on {}://{}", scheme, server_addr);
+            loop {
+                match server.accept().await {
+                    Ok((stream, addr)) => {
+                        debug!("{:?}: incomming: {addr}", std::thread::current().id());
+                        let conn = Connection::new_h1(addr, stream);
+                        self.send_task(Command::Incomming(conn)).await;
+                    }
+                    Err(err) => {
+                        error!("accept error: {err:#?}");
+                        warn!("current commands: {}", self.tx.len());
+                    }
                 }
-                Err(_) => {}
+            }
+
+            Ok::<_, Error>(())
+        });
+
+        for worker in self.workers.into_iter() {
+            if let Err(err) = worker.join() {
+                error!("worker error: {err:?}");
             }
         }
 
         Ok(())
     }
-}
-
-fn get_server_name(config: &Config) -> String {
-    format!("blaze:{}", config.port)
-}
-
-fn get_next_thread_name(server_name: &str, server_id: usize) -> String {
-    static LAST_WORKER_ID: Lazy<Mutex<Vec<usize>>> = Lazy::new(|| Mutex::new(Vec::new()));
-
-    let mut lock = LAST_WORKER_ID.lock();
-    let mut vec = &mut *lock;
-
-    if vec.len() <= server_id {
-        let extend_iter = iter::repeat(0).take(server_id - vec.len());
-
-        vec.extend(extend_iter);
-    }
-
-    let vec_len = vec.len();
-    let mut last_id = vec
-        .get_mut(server_id)
-        .with_context(|| {
-            format!(
-                "get_next_thread_name: out of bound server id: has={} request={}",
-                vec_len, server_id
-            )
-        })
-        .unwrap();
-
-    *last_id += 1;
-
-    let worker_name = format!("{}-worker:{}", server_name, *last_id - 1);
-
-    set_current_server_name(&server_name);
-    set_current_worker_name(&worker_name);
-
-    worker_name
-}
-
-thread_local! {
-    static CURRENT_SERVER_NAME: RefCell<String> = RefCell::new(String::new());
-    static CURRENT_WORKER_NAME: RefCell<String> = RefCell::new(String::new());
-}
-
-pub fn current_worker_name() -> String {
-    CURRENT_WORKER_NAME.with(|name| name.borrow().clone())
-}
-
-pub fn current_server_name() -> String {
-    CURRENT_SERVER_NAME.with(|name| name.borrow().clone())
-}
-
-fn set_current_server_name(server_name: &str) {
-    CURRENT_SERVER_NAME.with(|name| *name.borrow_mut() = server_name.to_string())
-}
-
-fn set_current_worker_name(worker_name: &str) {
-    CURRENT_WORKER_NAME.with(|name| *name.borrow_mut() = worker_name.to_string())
 }
