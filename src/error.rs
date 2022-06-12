@@ -89,6 +89,11 @@ impl BlazeError {
     {
         this.map_err(From::from)
     }
+
+    #[inline]
+    pub fn is_eof(&self) -> bool {
+        matches!(*self, BlazeError::Eof)
+    }
 }
 
 pub type BlazeResult<T> = Result<T, BlazeError>;

@@ -7,7 +7,7 @@ use http::{
 };
 use httparse::{Header, Request as HttparseRequest, Status};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 use crate::{err, error::BlazeResult, ok, util::buf::Buf};
 use crate::{
@@ -69,68 +69,51 @@ impl H1Connection {
                     break;
                 }
             };
-
-            // info!(
-            //     "remain buf: {:?}; is_empty: {}",
-            //     std::str::from_utf8(buf.filled()).unwrap(),
-            //     buf.is_empty()
-            // );
         }
 
-        // TODO
-        self.stream.shutdown().await.unwrap();
-
-        Ok(())
+        // TODO: handle error.
+        Ok(self.stream.shutdown().await?)
     }
 
     pub async fn read_request(&mut self, buf: &mut Buf) -> Result<Request> {
+        if buf.is_empty() {
+            buf.fill(&mut self.stream).await?;
+        }
+
         loop {
-            if buf.is_empty() {
-                // TODO
-                buf.fill(&mut self.stream).await.unwrap();
-                if buf.is_empty() {
-                    bail!(BlazeError::Eof)
-                } else {
-                    // info!(
-                    //     "read to empty buf: {} bytes\n{}",
-                    //     buf.filled().len(),
-                    //     std::str::from_utf8(buf.filled()).unwrap()
-                    // );
-                }
-            } else {
-                let reqbuf = buf.filled();
-                let mut header: [MaybeUninit<Header>; 20] = unsafe { MaybeUninit::uninit().assume_init() };
-                let mut hreq = HttparseRequest::new(&mut []);
-                let parsed_size = match hreq.parse_with_uninit_headers(reqbuf, &mut header) {
-                    Ok(Status::Complete(size)) => size,
-                    Ok(Status::Partial) => {
-                        if buf.is_full() {
-                            // The buff is fulled but header is still incomplete.
-                            // Not supported!
-
-                            bail!(BlazeError::RequestHeaderTooLarge)
-                        }
-
-                        info!("incomplete buf, fill more: {:?}", std::str::from_utf8(buf.filled()).unwrap());
-                        buf.fill(&mut self.stream).await.unwrap();
-                        if buf.is_empty() {
-                            warn!("read zero on read more");
-                            // bail!(BlazeError::Eof)
-                        }
-
-                        continue;
+            let reqbuf = buf.filled();
+            let mut header: [MaybeUninit<Header>; 20] = unsafe { MaybeUninit::uninit().assume_init() };
+            let mut hreq = HttparseRequest::new(&mut []);
+            let parsed_size = match hreq.parse_with_uninit_headers(reqbuf, &mut header) {
+                Ok(Status::Complete(size)) => size,
+                Ok(Status::Partial) => {
+                    if buf.is_full() {
+                        // The buff is fulled but header is still incomplete.
+                        debug!("read_request: header is too large");
+                        bail!(BlazeError::RequestHeaderTooLarge)
                     }
-                    Err(err) => Err(err).blaze_error()?,
-                };
 
-                let request = map_to_http_request(&hreq)?;
+                    debug!("read_request: parse header partial (already read: {} bytes)", buf.filled_size());
+                    if let Err(err) = buf.fill(&mut self.stream).await {
+                        if err.is_eof() {
+                            debug!("read_request: eof");
+                        }
 
-                buf.advance(parsed_size);
+                        bail!(err)
+                    }
 
-                // *request.body_mut() = HttpBody::Empty;
+                    continue;
+                }
+                Err(err) => Err(err).blaze_error()?,
+            };
 
-                return Ok(request);
-            }
+            let request = map_to_http_request(&hreq)?;
+
+            buf.advance(parsed_size);
+
+            // *request.body_mut() = HttpBody::Empty;
+
+            return Ok(request);
         }
     }
 }

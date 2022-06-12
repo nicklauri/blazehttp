@@ -13,7 +13,7 @@ use tokio::{
     select,
     task::{self, JoinHandle as TokioJoinHandle, LocalSet},
 };
-use tracing::{debug, info, trace};
+use tracing::{debug, info};
 
 use crate::{
     config::Config,
@@ -57,7 +57,7 @@ impl Worker {
         Ok(self
             .handle
             .join()
-            .map_err(|err| anyhow!("[{:>2}]: join error: {:?}", self.id, err))??)
+            .map_err(|err| anyhow!("worker[{:>2}]: join error: {:?}", self.id, err))??)
     }
 
     fn spawn_thread(id: usize, rx: Receiver<Command>, config: Config, shutdown: ShutdownNotity) -> JoinHandle<Result<()>> {
@@ -109,7 +109,9 @@ impl WorkerInner {
         let current_tasks = self.count_tasks();
 
         if current_tasks >= self.config.max_tasks_per_worker {
-            debug!("[{:>2}] reached max_tasks_per_worker: {}", self.id, self.config.max_tasks_per_worker);
+            debug!(config.max_tasks_per_worker = ?self.config.max_tasks_per_worker,
+                "worker[{:>2}] reached limit:", self.id);
+
             self.notify.notified().await;
         }
     }
@@ -144,7 +146,7 @@ impl WorkerInner {
         let err = loop {
             select! {
                 _ = self.shutdown.notified() => {
-                    trace!("[{:>2}]: shutdown notify received", self.id);
+                    debug!("worker[{:>2}]: shutting down", self.id);
                     return;
                 }
 
@@ -152,7 +154,10 @@ impl WorkerInner {
                     match res {
                         ControlFlow::Continue(_) => continue,
                         ControlFlow::Break(result) => match result {
-                            Ok(()) => return,
+                            Ok(()) => {
+                                // debug!("worker[{:>2}]: peacefully shutdown", self.id);
+                                return
+                            },
                             Err(err) => break err,
                         }
                     }
@@ -160,7 +165,7 @@ impl WorkerInner {
             }
         };
 
-        debug!("[{:>2}]: worker stopped with error: {err:#?}", self.id);
+        debug!("worker[{:>2}]: worker stopped with error: {err:#?}", self.id);
     }
 
     #[inline]
@@ -200,12 +205,12 @@ impl WorkerInner {
     }
 
     fn on_thread_start(id: usize, _config: Rc<Config>) {
-        trace!("[{:>2}]: thread start", id);
+        debug!("worker[{:>2}]: thread start", id);
     }
 
     fn on_thread_stop(id: usize, config: Rc<Config>) {
         if config.display_statistics_on_shutdown {
-            info!("[{:>2}]: total connections: {}", id, Self::connection(0));
+            info!("worker[{:>2}]: total connections: {}", id, Self::connection(0));
         }
     }
 }

@@ -147,6 +147,7 @@ impl<'n> Notified<'n> {
 
 impl<'n> Future for Notified<'n> {
     type Output = ();
+
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.state() {

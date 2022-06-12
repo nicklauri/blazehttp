@@ -59,7 +59,6 @@ impl Server {
         self.register_ctrl_c();
 
         let spawner = self.runtime.spawner();
-
         let result = self.runtime.run(async move {
             let server = TcpListener::bind(&server_addr).await?;
 
@@ -67,10 +66,7 @@ impl Server {
             loop {
                 select! {
                     _ = Server::accept_connection(&server, &spawner) => {}
-                    res = tokio::signal::ctrl_c() => {
-                        res.unwrap();
-                        break;
-                    }
+                    _ = tokio::signal::ctrl_c() => { break }
                 }
             }
 
@@ -78,7 +74,7 @@ impl Server {
         });
 
         if let Err(err) = result {
-            error!("runtime error: {err:#?}");
+            error!("server.serve: runtime error: {err:#?}");
         }
 
         info!("server is shutting down");
@@ -92,7 +88,7 @@ impl Server {
     async fn accept_connection(server: &TcpListener, spawner: &Spawner) {
         match server.accept().await {
             Ok((stream, addr)) => {
-                debug!(addr = ?addr, "server.accept()");
+                debug!(addr = ?addr, "server.accept");
 
                 let result = spawner
                     .spawn_task(move |config| Connection::new(addr, stream).handle(config))
@@ -104,7 +100,7 @@ impl Server {
             }
             Err(err) => {
                 warn!("server.accept: {err:#?}");
-                info!("spawner.pending_task_count(): {}", spawner.pending_task_count());
+                info!("spawner.pending_task_count: {}", spawner.pending_task_count());
             }
         }
     }
