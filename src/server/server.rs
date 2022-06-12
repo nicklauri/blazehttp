@@ -1,30 +1,16 @@
-use std::{
-    cell::RefCell,
-    io::ErrorKind,
-    iter,
-    net::ToSocketAddrs,
-    rc::Rc,
-    sync::{
-        atomic::{AtomicU8, Ordering},
-        Arc,
-    },
-    thread::{self, JoinHandle},
-    time::Duration,
-};
+use std::sync::atomic::{AtomicU8, Ordering};
 
-use anyhow::{Context, Error, Result};
-use async_channel::Sender;
-use once_cell::sync::Lazy;
-use parking_lot::Mutex;
-use tokio::{net::TcpListener, time};
+use anyhow::{Error, Result};
+use tokio::{net::TcpListener, select};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    config::{Config, Scheme, SharedConfig},
+    config::Config,
     proto::Connection,
-    runtime::{BlazeRuntime, Command},
+    runtime::{BlazeRuntime, Spawner},
 };
 
+#[allow(dead_code)]
 pub struct Server {
     id: u8,
     runtime: BlazeRuntime,
@@ -50,6 +36,19 @@ impl Server {
         SERVER_ID.fetch_add(1, Ordering::Relaxed)
     }
 
+    fn register_ctrl_c(&self) {
+        let shutdown_handle = self.runtime.shutdown_handle();
+
+        self.runtime.spawn(async {
+            if let Err(err) = tokio::signal::ctrl_c().await {
+                warn!("register_ctrl_c: await error: {err}");
+            }
+
+            info!("server is shutting down");
+            shutdown_handle.shutdown().await;
+        });
+    }
+
     pub fn serve(mut self) -> Result<()> {
         let (scheme, server_addr) = {
             let addr = format!("{}:{}", self.config.addr, self.config.port);
@@ -57,25 +56,20 @@ impl Server {
             (scheme, addr)
         };
 
+        self.register_ctrl_c();
+
         let spawner = self.runtime.spawner();
 
-        self.runtime.run(async move {
-            let mut server = TcpListener::bind(&server_addr).await?;
+        let result = self.runtime.run(async move {
+            let server = TcpListener::bind(&server_addr).await?;
 
             info!("listen on {}://{}", scheme, server_addr);
             loop {
-                match server.accept().await {
-                    Ok((stream, addr)) => {
-                        debug!("{:?}: incomming: {addr}", std::thread::current().id());
-
-                        // let conn = Connection::new(addr, stream);
-
-                        // spawner.spawn(Command::Incomming(conn)).await;
-                        spawner.spawn_task(move |config| Box::pin(Connection::new(addr, stream).handle(config)));
-                    }
-                    Err(err) => {
-                        error!("accept error: {err:#?}");
-                        warn!("current commands: {}", spawner.pending_task_count());
+                select! {
+                    _ = Server::accept_connection(&server, &spawner) => {}
+                    res = tokio::signal::ctrl_c() => {
+                        res.unwrap();
+                        break;
                     }
                 }
             }
@@ -83,8 +77,35 @@ impl Server {
             Ok::<_, Error>(())
         });
 
+        if let Err(err) = result {
+            error!("runtime error: {err:#?}");
+        }
+
+        info!("server is shutting down");
+
         self.runtime.graceful_shutdown()?;
 
         Ok(())
+    }
+
+    #[inline]
+    async fn accept_connection(server: &TcpListener, spawner: &Spawner) {
+        match server.accept().await {
+            Ok((stream, addr)) => {
+                debug!(addr = ?addr, "server.accept()");
+
+                let result = spawner
+                    .spawn_task(move |config| Connection::new(addr, stream).handle(config))
+                    .await;
+
+                if let Err(err) = result {
+                    warn!("spawner.spawn_task: {err:?}");
+                }
+            }
+            Err(err) => {
+                warn!("server.accept: {err:#?}");
+                info!("spawner.pending_task_count(): {}", spawner.pending_task_count());
+            }
+        }
     }
 }

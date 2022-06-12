@@ -7,7 +7,7 @@ macro_rules! err {
     };
 
     ($e:expr) => {
-        return Err($e);
+        return Err($e)
     };
 }
 
@@ -18,7 +18,7 @@ macro_rules! ok {
     };
 
     ($e:expr) => {
-        return Ok($e);
+        return Ok($e)
     };
 }
 

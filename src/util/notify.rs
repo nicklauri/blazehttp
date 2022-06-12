@@ -50,6 +50,7 @@ impl Notify {
 
     /// Wait for notify with timeout.<br />
     /// Return `true` if it got notified, `false` if timed out.
+    #[allow(dead_code)]
     #[inline]
     pub async fn notified_timeout(&self, duration: Duration) -> bool {
         time::timeout(duration, self.notified()).await.is_ok()
@@ -126,6 +127,7 @@ impl<'n> Notified<'n> {
         }
     }
 
+    #[allow(dead_code)]
     #[inline]
     fn wake(&self) {
         self.inner.borrow_mut().wake();
@@ -136,6 +138,7 @@ impl<'n> Notified<'n> {
         self.inner.borrow().state()
     }
 
+    #[allow(dead_code)]
     #[inline]
     fn count_notifiers(&self) -> u32 {
         self.inner.borrow().count_notifiers()

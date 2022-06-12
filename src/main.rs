@@ -1,9 +1,8 @@
-#![allow(warnings)]
+// #![allow(warnings)]
 
-use std::{env, sync::Arc, time::Duration};
+use std::env;
 
 use anyhow::Result;
-use parking_lot::RwLock;
 
 use crate::{config::Config, server::server::Server};
 

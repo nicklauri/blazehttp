@@ -1,14 +1,10 @@
 pub mod path;
 
-use std::{fmt::Display, sync::Arc};
+use std::fmt::Display;
 
-use once_cell::sync::Lazy;
-use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use self::path::Location;
-
-pub type SharedConfig = Arc<Config>;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
@@ -32,6 +28,9 @@ pub struct Config {
 
     #[serde(default = "default_max_connections_in_waiting")]
     pub max_connections_in_waiting: usize,
+
+    #[serde(default)]
+    pub display_statistics_on_shutdown: bool,
 }
 
 impl Config {
@@ -44,6 +43,8 @@ impl Config {
             pattern: Vec::new(),
             max_tasks_per_worker: default_tasks_per_worker(),
             max_connections_in_waiting: default_max_connections_in_waiting(),
+            // display_statistics_on_shutdown: Default::default(),
+            display_statistics_on_shutdown: true,
         }
     }
 }

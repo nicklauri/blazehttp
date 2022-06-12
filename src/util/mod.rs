@@ -6,12 +6,9 @@ pub mod num;
 
 pub use functional::*;
 
-use std::cell::RefCell;
 use std::future::Future;
-use std::marker::PhantomData;
-use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::task::{Context, Poll};
+use std::thread::{self, ThreadId};
 
 use tokio::task::JoinHandle;
 
@@ -32,4 +29,13 @@ where
     F::Output: 'static,
 {
     tokio::task::spawn_local(f)
+}
+
+#[allow(dead_code)]
+#[inline]
+pub fn thread_id() -> ThreadId {
+    thread_local! {
+        static THREAD_ID: ThreadId = thread::current().id();
+    }
+    THREAD_ID.with(|t| *t)
 }

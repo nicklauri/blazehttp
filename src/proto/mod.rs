@@ -1,10 +1,9 @@
 use crate::config::Config;
 
 use self::body::HttpBody;
-use anyhow::Result;
 use http::Request as HttpRequest;
-use std::{net::SocketAddr, rc::Rc, time::Duration};
-use tokio::{net::TcpStream, time::sleep};
+use std::{net::SocketAddr, rc::Rc};
+use tokio::net::TcpStream;
 
 pub mod body;
 pub mod h1;
@@ -12,6 +11,7 @@ pub mod h2;
 
 pub type Request = HttpRequest<HttpBody>;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum ConnectionType {
     H1,
@@ -30,7 +30,7 @@ impl Connection {
         Self { addr, stream }
     }
 
-    pub async fn handle(mut self, config: Rc<Config>) {
+    pub async fn handle(self, _config: Rc<Config>) {
         h1::handle_connection(self.stream, self.addr).await;
     }
 }

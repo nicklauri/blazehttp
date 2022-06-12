@@ -1,7 +1,4 @@
-use anyhow::{anyhow, bail, Result};
-use std::io;
-use tokio::io::{AsyncRead, AsyncReadExt};
-use tracing::error;
+use tokio::io::AsyncReadExt;
 
 use crate::{
     err,
@@ -34,6 +31,7 @@ impl Buf {
     }
 
     /// Construct from a vector.
+    #[allow(dead_code)]
     #[inline]
     pub fn from_vec(mut vec: Vec<u8>) -> Self {
         if vec.len() < vec.capacity() {
@@ -44,13 +42,11 @@ impl Buf {
 
         let data = vec.into_boxed_slice();
 
-        Self {
-            pos: data.len(),
-            data,
-        }
+        Self { pos: data.len(), data }
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.pos = 0;
     }
@@ -81,6 +77,7 @@ impl Buf {
         &self.data[..self.pos]
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub fn clear(&mut self) {
         self.pos = 0;
@@ -92,20 +89,17 @@ impl Buf {
     }
 
     #[inline]
-    pub fn pos(&self) -> usize {
-        self.pos
-    }
-
-    #[inline]
     pub fn is_full(&self) -> bool {
         self.pos >= self.data.len()
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub fn buf_capacity(&self) -> usize {
         self.data.len()
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub fn filled_size(&self) -> usize {
         self.pos
@@ -127,13 +121,10 @@ impl Buf {
     }
 
     /// Consume self and return unlying vector.
+    #[allow(dead_code)]
     #[inline]
-    pub fn to_vec(mut self) -> Vec<u8> {
-        let vec_len = if self.pos <= self.data.len() {
-            self.pos
-        } else {
-            0
-        };
+    pub fn to_vec(self) -> Vec<u8> {
+        let vec_len = if self.pos <= self.data.len() { self.pos } else { 0 };
         let mut vec = self.data.to_vec();
 
         unsafe {
@@ -148,7 +139,7 @@ impl Buf {
 mod test {
     use std::time::Duration;
 
-    use tokio::time::{self, error::Elapsed};
+    use tokio::time::{self};
     use tokio_test::io::Builder;
 
     use crate::error::BlazeError;
@@ -197,10 +188,7 @@ mod test {
             let fut = buf.fill(&mut mock);
             let timeout_res = time::timeout(Duration::from_secs(1), fut).await;
 
-            assert!(
-                timeout_res.is_ok(),
-                "read operation took longer time than expected"
-            );
+            assert!(timeout_res.is_ok(), "read operation took longer time than expected");
 
             let res = timeout_res.unwrap();
 
@@ -216,13 +204,10 @@ mod test {
 
     #[tokio::test]
     async fn advance_buf() {
-        let mut mock = Builder::new()
-            .read(b"hello world")
-            .read(b"blaze http")
-            .build();
+        // let mock = Builder::new().read(b"hello world").read(b"blaze http").build();
 
-        const MAX_CAP: usize = 8096;
-        let mut buf = Buf::with_capacity(MAX_CAP);
+        // const MAX_CAP: usize = 8096;
+        // let buf = Buf::with_capacity(MAX_CAP);
     }
 
     #[tokio::test]

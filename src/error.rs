@@ -1,7 +1,7 @@
 use std::io;
 use std::{error::Error as StdError, num::ParseIntError};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use http::{
     header::{InvalidHeaderName, InvalidHeaderValue, ToStrError as HeaderValueToStrError},
     method::InvalidMethod,
@@ -9,6 +9,7 @@ use http::{
 };
 use thiserror::Error;
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum BlazeError {
     /// Return: 414 URI Too Long
@@ -79,6 +80,7 @@ impl BlazeError {
         this.map_err(From::from)
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub fn transform_anyhow<T, R>(this: Result<T, R>) -> Result<T>
     where
@@ -156,7 +158,7 @@ impl<T, E> BlazeErrorExt<T> for Result<T, E>
 where
     E: Into<BlazeError>,
 {
-    fn blaze_error(mut self) -> BlazeResult<T> {
+    fn blaze_error(self) -> BlazeResult<T> {
         self.map_err(Into::into)
     }
 }

@@ -1,25 +1,15 @@
-use std::{
-    mem::MaybeUninit,
-    net::SocketAddr,
-    ops::ControlFlow,
-    thread,
-    time::{self, Duration},
-};
+use std::{mem::MaybeUninit, net::SocketAddr};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Result};
 use http::{
-    header::{self, HeaderName, CONTENT_LENGTH, EXPECT, TRANSFER_ENCODING},
-    method::InvalidMethod,
-    HeaderMap, HeaderValue, Method, Request as HttpRequest, Uri, Version,
+    header::{HeaderName, CONTENT_LENGTH, EXPECT, TRANSFER_ENCODING},
+    HeaderMap, HeaderValue, Method, Uri, Version,
 };
 use httparse::{Header, Request as HttparseRequest, Status};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
-use tracing::{debug, error, info, warn};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
+use tracing::{info, warn};
 
-use crate::{err, error::BlazeResult, ok, server::server, util::buf::Buf};
+use crate::{err, error::BlazeResult, ok, util::buf::Buf};
 use crate::{
     error::{BlazeError, BlazeErrorExt},
     util,
@@ -30,12 +20,13 @@ use super::{body::HttpBody, Request};
 pub async fn handle_connection(stream: TcpStream, addr: SocketAddr) {
     match H1Connection::new(stream, addr).handle_connection().await {
         Ok(()) => {}
-        Err(err) => {
+        Err(_err) => {
             // error!("error: {:?}", err);
         }
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct H1Connection {
     stream: TcpStream,
@@ -57,16 +48,16 @@ impl H1Connection {
         const DATA: &[u8] = b"HTTP/1.1 200 OK\ncontent-length: 12\r\n\r\nHello, world";
         loop {
             // Note: should handle every errors then send appropriate error page.
-            let mut request = match self.read_request(&mut buf).await {
+            let request = match self.read_request(&mut buf).await {
                 Ok(request) => request,
-                Err(err) => {
+                Err(_err) => {
                     break;
                 }
             };
 
             match self.info.fill_info(&request) {
                 Ok(_) => {}
-                Err(error) => {
+                Err(_error) => {
                     warn!("fill_info error");
                     break;
                 }
@@ -74,7 +65,7 @@ impl H1Connection {
 
             match self.stream.write_all(DATA).await {
                 Ok(_m) => {}
-                Err(error) => {
+                Err(_error) => {
                     break;
                 }
             };
@@ -85,7 +76,9 @@ impl H1Connection {
             //     buf.is_empty()
             // );
         }
-        self.stream.shutdown().await;
+
+        // TODO
+        self.stream.shutdown().await.unwrap();
 
         Ok(())
     }
@@ -93,8 +86,8 @@ impl H1Connection {
     pub async fn read_request(&mut self, buf: &mut Buf) -> Result<Request> {
         loop {
             if buf.is_empty() {
-                // info!("fill empty buf");
-                buf.fill(&mut self.stream).await;
+                // TODO
+                buf.fill(&mut self.stream).await.unwrap();
                 if buf.is_empty() {
                     bail!(BlazeError::Eof)
                 } else {
@@ -106,8 +99,7 @@ impl H1Connection {
                 }
             } else {
                 let reqbuf = buf.filled();
-                let mut header: [MaybeUninit<Header>; 20] =
-                    unsafe { MaybeUninit::uninit().assume_init() };
+                let mut header: [MaybeUninit<Header>; 20] = unsafe { MaybeUninit::uninit().assume_init() };
                 let mut hreq = HttparseRequest::new(&mut []);
                 let parsed_size = match hreq.parse_with_uninit_headers(reqbuf, &mut header) {
                     Ok(Status::Complete(size)) => size,
@@ -119,11 +111,8 @@ impl H1Connection {
                             bail!(BlazeError::RequestHeaderTooLarge)
                         }
 
-                        info!(
-                            "incomplete buf, fill more: {:?}",
-                            std::str::from_utf8(buf.filled()).unwrap()
-                        );
-                        buf.fill(&mut self.stream).await;
+                        info!("incomplete buf, fill more: {:?}", std::str::from_utf8(buf.filled()).unwrap());
+                        buf.fill(&mut self.stream).await.unwrap();
                         if buf.is_empty() {
                             warn!("read zero on read more");
                             // bail!(BlazeError::Eof)
@@ -134,7 +123,7 @@ impl H1Connection {
                     Err(err) => Err(err).blaze_error()?,
                 };
 
-                let mut request = map_to_http_request(&hreq)?;
+                let request = map_to_http_request(&hreq)?;
 
                 buf.advance(parsed_size);
 
@@ -149,10 +138,10 @@ impl H1Connection {
 fn map_to_http_request(hreq: &HttparseRequest) -> Result<Request> {
     let mut req = Request::new(HttpBody::default());
 
-    get_method(&hreq, &mut req);
-    get_path(&hreq, &mut req);
-    get_version(&hreq, &mut req);
-    get_headers(&hreq, &mut req);
+    get_method(&hreq, &mut req)?;
+    get_path(&hreq, &mut req)?;
+    get_version(&hreq, &mut req)?;
+    get_headers(&hreq, &mut req)?;
 
     Ok(req)
 }
@@ -178,14 +167,11 @@ fn get_path(hreq: &HttparseRequest, req: &mut Request) -> Result<()> {
 
 #[inline]
 fn get_version(hreq: &HttparseRequest, req: &mut Request) -> Result<()> {
-    *req.version_mut() = hreq
-        .version
-        .ok_or(BlazeError::InvalidVersion)
-        .and_then(|v| match v {
-            0 => Ok(Version::HTTP_10),
-            1 => Ok(Version::HTTP_11),
-            _ => Err(BlazeError::InvalidVersion), // Note: httparse doesn't parse 0.9 or 2.0, 3.0
-        })?;
+    *req.version_mut() = hreq.version.ok_or(BlazeError::InvalidVersion).and_then(|v| match v {
+        0 => Ok(Version::HTTP_10),
+        1 => Ok(Version::HTTP_11),
+        _ => Err(BlazeError::InvalidVersion), // Note: httparse doesn't parse 0.9 or 2.0, 3.0
+    })?;
     Ok(())
 }
 
@@ -196,10 +182,8 @@ fn get_headers(hreq: &HttparseRequest, req: &mut Request) -> Result<()> {
     let mut header_maps = HeaderMap::with_capacity(header_count);
 
     for (name, value) in header_iter {
-        let header_name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(|_| BlazeError::InvalidHeaderName(name.to_string()))?;
-        let header_value =
-            HeaderValue::from_bytes(value).or(Err(BlazeError::InvalidHeaderValue))?;
+        let header_name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| BlazeError::InvalidHeaderName(name.to_string()))?;
+        let header_value = HeaderValue::from_bytes(value).or(Err(BlazeError::InvalidHeaderValue))?;
 
         header_maps.append(header_name, header_value);
     }
@@ -209,6 +193,7 @@ fn get_headers(hreq: &HttparseRequest, req: &mut Request) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct H1ConnInfo {
     keep_alive: bool,
@@ -238,9 +223,7 @@ impl H1ConnInfo {
             None => ok!(self.expect_continue = false), // This is just setting self.expect_continue to false and return Ok(())
         };
 
-        self.expect_continue = expect_value
-            .as_bytes()
-            .eq_ignore_ascii_case(b"100-continue");
+        self.expect_continue = expect_value.as_bytes().eq_ignore_ascii_case(b"100-continue");
 
         // At this point, self.expect_continue must be true.
         if !self.expect_continue {
@@ -251,8 +234,8 @@ impl H1ConnInfo {
     }
 
     fn get_content_length(&mut self, req: &Request) -> BlazeResult<()> {
-        const NOT_ALLOWED_BODY_METHODS: &'static [Method] =
-            &[Method::GET, Method::HEAD, Method::OPTIONS, Method::DELETE];
+        #[allow(dead_code)]
+        const NOT_ALLOWED_BODY_METHODS: &'static [Method] = &[Method::GET, Method::HEAD, Method::OPTIONS, Method::DELETE];
 
         self.content_length = BodyLen::Empty;
 
@@ -296,6 +279,7 @@ impl BodyLen {
         matches!(self, BodyLen::Chunked)
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub fn is_empty(&self) -> bool {
         matches!(self, BodyLen::Empty)

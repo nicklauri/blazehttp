@@ -1,14 +1,15 @@
-use std::{path::PathBuf, rc::Rc, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
-use anyhow::{anyhow, Context};
-use http::{header::HeaderName, HeaderMap, HeaderValue};
+use http::{header::HeaderName, HeaderValue};
 use regex::Regex;
 use serde::{de::Error, Deserialize, Deserializer};
 
-use crate::{error::BlazeError, util};
+use crate::util;
 
+#[allow(dead_code)]
 pub type UriPath<'a> = &'a str;
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct Location {
     pattern: PathPattern,
@@ -35,10 +36,7 @@ impl Location {
 
         headers
             .into_iter()
-            .map(util::result::and_then_tuple(
-                str::parse::<HeaderName>,
-                str::parse::<HeaderValue>,
-            ))
+            .map(util::result::and_then_tuple(str::parse::<HeaderName>, str::parse::<HeaderValue>))
             .collect::<Result<_, _>>()
             .map_err(D::Error::custom)
     }
@@ -75,6 +73,7 @@ impl PathPattern {
         Regex::new(regex_str).map_err(D::Error::custom)
     }
 
+    #[allow(dead_code)]
     pub fn match_against(&self, path: UriPath<'_>) -> bool {
         match self {
             PathPattern::All => true,
@@ -82,7 +81,6 @@ impl PathPattern {
             PathPattern::Suffix(p) => path.ends_with(p),
             PathPattern::Exact(p) => path == p,
             PathPattern::Regex(reg) => reg.is_match(path),
-            pattern => panic!("unsupported pattern: {:?}", pattern),
         }
     }
 }
@@ -99,6 +97,7 @@ impl ServeMode {
         Self::Files("./www".into())
     }
 
+    #[allow(dead_code)]
     pub fn get_file_path(&self, path: UriPath<'_>) -> Option<PathBuf> {
         match self {
             ServeMode::Files(ref root) => {
@@ -106,7 +105,6 @@ impl ServeMode {
                 system_path.push(path);
                 Some(system_path)
             }
-            _ => None,
         }
     }
 }
