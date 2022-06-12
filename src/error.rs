@@ -160,3 +160,12 @@ where
         self.map_err(Into::into)
     }
 }
+
+#[derive(Debug, Error)]
+pub enum BlazeRuntimeError {
+    #[error("Blaze runtime is stopped")]
+    RuntimeStopped,
+
+    #[error("Worker is stopped")]
+    WorkerStopped,
+}

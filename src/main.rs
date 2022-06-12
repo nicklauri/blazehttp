@@ -10,9 +10,9 @@ use crate::{config::Config, server::server::Server};
 mod config;
 mod error;
 mod proto;
+mod runtime;
 mod server;
 mod util;
-mod worker;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();

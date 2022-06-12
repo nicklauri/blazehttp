@@ -9,5 +9,4 @@ features:
     - multiple servers'
     
 12/06:
-    - write a notify
-    - complete workers and runtime
+    - separate runtime from server.rs

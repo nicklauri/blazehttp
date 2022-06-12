@@ -4,6 +4,8 @@ use std::{
     cell::RefCell,
     future::{self, Future},
     net::SocketAddr,
+    ops::ControlFlow,
+    pin::Pin,
     rc::Rc,
     thread::{self, JoinHandle},
 };
@@ -22,15 +24,20 @@ use crate::{
     util::{self, Notify},
 };
 
+use super::ShutdownNotity;
+
 pub type WorkerHandle = JoinHandle<Result<()>>;
+pub type TaskFn = dyn FnOnce(Rc<Config>) -> Pin<Box<dyn Future<Output = ()>>> + Send + Sync + 'static;
+pub type Task = Box<TaskFn>;
 
 thread_local! {
     static TASK_COUNTER: RefCell<u32> = RefCell::new(0);
 }
 
-#[derive(Debug)]
 pub enum Command {
     Incomming(Connection),
+    Task(Task),
+    Stop,
 }
 
 #[derive(Debug)]
@@ -40,21 +47,18 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new(rx: Receiver<Command>, config: Config) -> Result<Worker> {
+    pub fn new(rx: Receiver<Command>, config: Config, shutdown: ShutdownNotity) -> Result<Worker> {
         let id = util::next_id();
-        let handle = Worker::spawn_thread(id, rx, config);
+        let handle = Worker::spawn_thread(id, rx, config, shutdown);
 
         Ok(Self { id, handle })
     }
 
     pub fn join(self) -> Result<()> {
-        Ok(self
-            .handle
-            .join()
-            .map_err(|err| anyhow!("join error: {err:?}"))??)
+        Ok(self.handle.join().map_err(|err| anyhow!("join error: {err:?}"))??)
     }
 
-    fn spawn_thread(id: usize, rx: Receiver<Command>, config: Config) -> JoinHandle<Result<()>> {
+    fn spawn_thread(id: usize, rx: Receiver<Command>, config: Config, shutdown: ShutdownNotity) -> JoinHandle<Result<()>> {
         let handle = thread::spawn(move || {
             let rt = Builder::new_current_thread()
                 .enable_all()
@@ -63,7 +67,7 @@ impl Worker {
                 .build()?;
 
             let localset = LocalSet::new();
-            let fut = localset.run_until(WorkerInner::new(id, rx, config).run());
+            let fut = localset.run_until(WorkerInner::new(id, rx, config, shutdown).run());
 
             rt.block_on(fut);
             rt.block_on(localset); // Drain all tasks in the set.
@@ -80,15 +84,17 @@ struct WorkerInner {
     rx: Receiver<Command>,
     config: Rc<Config>,
     notify: Notify,
+    shutdown: ShutdownNotity,
 }
 
 impl WorkerInner {
-    fn new(id: usize, rx: Receiver<Command>, config: Config) -> Self {
+    fn new(id: usize, rx: Receiver<Command>, config: Config, shutdown: ShutdownNotity) -> Self {
         Self {
             id,
             rx,
             config: Rc::new(config),
             notify: Notify::new(),
+            shutdown,
         }
     }
 
@@ -96,28 +102,31 @@ impl WorkerInner {
         let current_tasks = self.count_tasks();
 
         if current_tasks >= self.config.max_tasks_per_worker {
-            debug!(
-                "reached max_tasks_per_worker: {}",
-                self.config.max_tasks_per_worker
-            );
+            debug!("reached max_tasks_per_worker: {}", self.config.max_tasks_per_worker);
             self.notify.notified().await;
         }
     }
 
-    async fn handle_task(&self) -> Result<()> {
+    async fn handle_task(&self) -> ControlFlow<Result<()>> {
         // Handle backpressure.
         self.ready().await;
 
-        match self.rx.recv().await? {
-            Command::Incomming(conn) => {
-                // WorkerInner::connection(1);
-                self.spawn_managed_task(conn.handle(self.config.clone()));
-            }
+        match self.rx.recv().await {
+            Ok(task) => match task {
+                Command::Incomming(conn) => {
+                    // WorkerInner::connection(1);
+                    self.spawn_managed_task(conn.handle(self.config.clone()));
+                }
+                Command::Task(fut) => {
+                    self.spawn_managed_task(fut(self.config.clone()));
+                }
+                Command::Stop => return ControlFlow::Break(Ok(())),
+            },
+            Err(err) => return ControlFlow::Break(Err(err.into())),
         }
 
         task::yield_now().await;
-
-        Ok(())
+        ControlFlow::Continue(())
     }
 
     async fn worker_command(&self) -> Result<()> {
@@ -128,17 +137,15 @@ impl WorkerInner {
 
     async fn run(mut self) -> Result<()> {
         loop {
-            // select! {
-            //     // res = self.worker_command() => {
-            //     //     // stop the worker.
-            //     // }
+            select! {
+                res = self.shutdown.notified() => {
+                    // stop the worker.
+                }
 
-            //     res = self.handle_task() => {
-            //         // handle worker spawned task.
-            //     }
-            // }
-
-            self.handle_task().await?;
+                res = self.handle_task() => {
+                    // handle worker spawned task.
+                }
+            }
         }
 
         Ok(())

@@ -26,13 +26,11 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new_h1(addr: SocketAddr, stream: TcpStream) -> Self {
+    pub fn new(addr: SocketAddr, stream: TcpStream) -> Self {
         Self { addr, stream }
     }
 
-    pub async fn handle(mut self, config: Rc<Config>) -> Result<()> {
+    pub async fn handle(mut self, config: Rc<Config>) {
         h1::handle_connection(self.stream, self.addr).await;
-
-        Ok(())
     }
 }
