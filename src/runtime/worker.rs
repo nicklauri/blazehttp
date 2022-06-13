@@ -17,7 +17,7 @@ use tracing::{debug, info};
 
 use crate::{
     config::Config,
-    proto::Connection,
+    proto,
     util::{self, Notify},
 };
 
@@ -30,9 +30,8 @@ thread_local! {
     static TASK_COUNTER: RefCell<u32> = RefCell::new(0);
 }
 
-#[allow(dead_code)]
 pub enum Command {
-    Incomming(Connection),
+    H1(proto::Connection),
     Task(Task),
     Stop,
 }
@@ -123,8 +122,8 @@ impl WorkerInner {
 
         match self.rx.recv().await {
             Ok(task) => match task {
-                Command::Incomming(conn) => {
-                    self.spawn_managed_task(conn.handle(self.config.clone()));
+                Command::H1(conn) => {
+                    self.spawn_managed_task(proto::handle_h1_connection(conn, self.config.clone()));
                 }
                 Command::Task(func) => {
                     self.spawn_managed_task(func(self.config.clone()));

@@ -43,8 +43,7 @@ impl Config {
             pattern: Vec::new(),
             max_tasks_per_worker: default_tasks_per_worker(),
             max_connections_in_waiting: default_max_connections_in_waiting(),
-            // display_statistics_on_shutdown: Default::default(),
-            display_statistics_on_shutdown: true,
+            display_statistics_on_shutdown: Default::default(),
         }
     }
 }

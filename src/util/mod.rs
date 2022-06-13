@@ -31,7 +31,6 @@ where
     tokio::task::spawn_local(f)
 }
 
-#[allow(dead_code)]
 #[inline]
 pub fn thread_id() -> ThreadId {
     thread_local! {

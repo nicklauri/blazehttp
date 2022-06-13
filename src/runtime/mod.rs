@@ -92,7 +92,7 @@ impl BlazeRuntime {
         let spawner = self.spawner();
 
         let res = self.run(async move {
-            debug!("sending stop command to workers");
+            debug!(number_of_workers = ?number_of_workers, "sending stop command to workers");
             for _ in 0..number_of_workers {
                 spawner.send_command(Command::Stop).await?;
             }
@@ -100,7 +100,7 @@ impl BlazeRuntime {
         });
 
         if let Err(err) = res {
-            error!("send shutdown signal to workers error: {err:?}");
+            error!("send shutdown signal to workers: {err:?}");
         }
 
         debug!("join with worker threads: {} worker(s)", self.workers.len());
@@ -114,7 +114,6 @@ impl BlazeRuntime {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub fn shutdown(&mut self) -> Result<(), BlazeRuntimeError> {
         err!(self.workers.is_empty(), BlazeRuntimeError::WorkerStopped);
 
@@ -187,7 +186,6 @@ impl Spawner {
     }
 
     /// Return number of receivers, it should match with the number of workers.
-    #[allow(dead_code)]
     #[inline]
     pub fn receiver_count(&self) -> usize {
         self.tx.receiver_count()
@@ -207,7 +205,6 @@ pub struct ShutdownHandle {
 }
 
 impl ShutdownHandle {
-    #[allow(dead_code)]
     pub async fn shutdown(self) {
         for _ in 0..self.number_of_workers {
             // TODO: unwrap!
@@ -217,6 +214,5 @@ impl ShutdownHandle {
         self.shutdown.notify_waiters();
     }
 
-    #[allow(dead_code)]
     pub async fn shutdown_gracefully(self) {}
 }

@@ -1,4 +1,4 @@
-use std::{mem::MaybeUninit, net::SocketAddr};
+use std::{mem::MaybeUninit, net::SocketAddr, rc::Rc};
 
 use anyhow::{bail, Result};
 use http::{
@@ -9,7 +9,7 @@ use httparse::{Header, Request as HttparseRequest, Status};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tracing::{debug, warn};
 
-use crate::{err, error::BlazeResult, ok, util::buf::Buf};
+use crate::{config::Config, err, error::BlazeResult, ok, util::buf::Buf};
 use crate::{
     error::{BlazeError, BlazeErrorExt},
     util,
@@ -17,33 +17,27 @@ use crate::{
 
 use super::{body::HttpBody, Request};
 
-pub async fn handle_connection(stream: TcpStream, addr: SocketAddr) {
-    match H1Connection::new(stream, addr).handle_connection().await {
-        Ok(()) => {}
-        Err(_err) => {
-            // error!("error: {:?}", err);
-        }
-    }
-}
-
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct H1Connection {
     stream: TcpStream,
     addr: SocketAddr,
     info: H1ConnInfo,
+    config: Rc<Config>,
 }
 
 impl H1Connection {
-    pub fn new(stream: TcpStream, addr: SocketAddr) -> Self {
+    pub(super) fn new(conn: super::Connection, config: Rc<Config>) -> Self {
+        let super::Connection { stream, addr } = conn;
+
         Self {
             stream,
             addr,
+            config,
             info: H1ConnInfo::default(),
         }
     }
 
-    pub async fn handle_connection(mut self) -> Result<()> {
+    pub async fn handle_connection(mut self) {
         let mut buf = Buf::with_capacity(8 * 1024);
         const DATA: &[u8] = b"HTTP/1.1 200 OK\ncontent-length: 12\r\n\r\nHello, world";
         loop {
@@ -71,8 +65,9 @@ impl H1Connection {
             };
         }
 
-        // TODO: handle error.
-        Ok(self.stream.shutdown().await?)
+        if let Err(err) = self.stream.shutdown().await {
+            debug!("stream.shutdown() error: {:?}", err);
+        }
     }
 
     pub async fn read_request(&mut self, buf: &mut Buf) -> Result<Request> {
@@ -176,7 +171,6 @@ fn get_headers(hreq: &HttparseRequest, req: &mut Request) -> Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct H1ConnInfo {
     keep_alive: bool,
@@ -217,7 +211,6 @@ impl H1ConnInfo {
     }
 
     fn get_content_length(&mut self, req: &Request) -> BlazeResult<()> {
-        #[allow(dead_code)]
         const NOT_ALLOWED_BODY_METHODS: &'static [Method] = &[Method::GET, Method::HEAD, Method::OPTIONS, Method::DELETE];
 
         self.content_length = BodyLen::Empty;
@@ -262,7 +255,6 @@ impl BodyLen {
         matches!(self, BodyLen::Chunked)
     }
 
-    #[allow(dead_code)]
     #[inline]
     pub fn is_empty(&self) -> bool {
         matches!(self, BodyLen::Empty)

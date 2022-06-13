@@ -9,7 +9,6 @@ use http::{
 };
 use thiserror::Error;
 
-#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum BlazeError {
     /// Return: 414 URI Too Long
@@ -80,7 +79,6 @@ impl BlazeError {
         this.map_err(From::from)
     }
 
-    #[allow(dead_code)]
     #[inline]
     pub fn transform_anyhow<T, R>(this: Result<T, R>) -> Result<T>
     where

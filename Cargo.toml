@@ -12,7 +12,7 @@ lto = "thin"
 anyhow = "1.0.57"
 async-channel = "1.6.1"
 crossbeam = "0.8.1"
-h2 = { version = "0.3.13", features = ["stream"] }
+http2 = { version = "0.3.13", features = ["stream"], package = "h2" }
 http = "0.2.7"
 httparse = "1.7.1"
 nom = "7.1.1"

@@ -6,11 +6,10 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     config::Config,
-    proto::Connection,
+    proto,
     runtime::{BlazeRuntime, Spawner},
 };
 
-#[allow(dead_code)]
 pub struct Server {
     id: u8,
     runtime: BlazeRuntime,
@@ -20,8 +19,6 @@ pub struct Server {
 impl Server {
     pub fn new(config: Config) -> Result<Server> {
         let server_id = Server::get_id();
-        let config = config;
-
         let runtime = BlazeRuntime::new(&config)?;
 
         Ok(Self {
@@ -63,10 +60,18 @@ impl Server {
             let server = TcpListener::bind(&server_addr).await?;
 
             info!("listen on {}://{}", scheme, server_addr);
+            // TODO: handle tcp/http, tls/http, h2
+            // Note: tls/http and h2 can be on the same TcpListener, but tcp/http can't.
+            // Currently, blazehttp can only handle tcp/http.
             loop {
                 select! {
-                    _ = Server::accept_connection(&server, &spawner) => {}
-                    _ = tokio::signal::ctrl_c() => { break }
+                    _ = Server::accept_connection_h1(&server, &spawner) => {}
+                    res = tokio::signal::ctrl_c() => {
+                        if let Err(err) = res {
+                            warn!("await CTRL-C signal error: {err:#?}");
+                        }
+                        break
+                    }
                 }
             }
 
@@ -85,17 +90,18 @@ impl Server {
     }
 
     #[inline]
-    async fn accept_connection(server: &TcpListener, spawner: &Spawner) {
+    async fn accept_connection_h1(server: &TcpListener, spawner: &Spawner) {
         match server.accept().await {
             Ok((stream, addr)) => {
-                debug!(addr = ?addr, "server.accept");
+                debug!(?addr, "server.accept");
 
+                let conn = proto::Connection::new(stream, addr);
                 let result = spawner
-                    .spawn_task(move |config| Connection::new(addr, stream).handle(config))
+                    .spawn_task(move |config| proto::handle_h1_connection(conn, config))
                     .await;
 
                 if let Err(err) = result {
-                    warn!("spawner.spawn_task: {err:?}");
+                    warn!(?err, "spawner.spawn_task");
                 }
             }
             Err(err) => {

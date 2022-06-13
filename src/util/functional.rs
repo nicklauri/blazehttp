@@ -50,7 +50,6 @@ pub mod result {
         move |t, u| f(t).and_then(|t| g(u).and_then(|u| Ok((t, u))))
     }
 
-    #[allow(dead_code)]
     pub fn and_then<F, G, T, U, R, E>(f: F, g: G) -> impl FnOnce(T) -> Result<R, E>
     where
         F: FnOnce(T) -> Result<U, E>,
@@ -59,7 +58,6 @@ pub mod result {
         move |t| Result::and_then(f(t), g)
     }
 
-    #[allow(dead_code)]
     pub fn map_err<F, T, E1, E2>(f: F) -> impl FnMut(Result<T, E1>) -> Result<T, E2>
     where
         F: Fn(E1) -> E2,
@@ -67,7 +65,6 @@ pub mod result {
         move |res| res.map_err(&f)
     }
 
-    #[allow(dead_code)]
     pub fn map_ok<F, T, U, E>(f: F) -> impl FnMut(Result<T, E>) -> Result<U, E>
     where
         F: Fn(T) -> U,

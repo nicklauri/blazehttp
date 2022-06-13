@@ -31,7 +31,6 @@ impl Buf {
     }
 
     /// Construct from a vector.
-    #[allow(dead_code)]
     #[inline]
     pub fn from_vec(mut vec: Vec<u8>) -> Self {
         if vec.len() < vec.capacity() {
@@ -46,7 +45,6 @@ impl Buf {
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.pos = 0;
     }
@@ -77,7 +75,6 @@ impl Buf {
         &self.data[..self.pos]
     }
 
-    #[allow(dead_code)]
     #[inline]
     pub fn clear(&mut self) {
         self.pos = 0;
@@ -93,13 +90,11 @@ impl Buf {
         self.pos >= self.data.len()
     }
 
-    #[allow(dead_code)]
     #[inline]
     pub fn buf_capacity(&self) -> usize {
         self.data.len()
     }
 
-    #[allow(dead_code)]
     #[inline]
     pub fn filled_size(&self) -> usize {
         self.pos
@@ -121,7 +116,6 @@ impl Buf {
     }
 
     /// Consume self and return unlying vector.
-    #[allow(dead_code)]
     #[inline]
     pub fn to_vec(self) -> Vec<u8> {
         let vec_len = if self.pos <= self.data.len() { self.pos } else { 0 };

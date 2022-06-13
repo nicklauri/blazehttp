@@ -6,10 +6,8 @@ use serde::{de::Error, Deserialize, Deserializer};
 
 use crate::util;
 
-#[allow(dead_code)]
 pub type UriPath<'a> = &'a str;
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct Location {
     pattern: PathPattern,
@@ -25,6 +23,17 @@ pub struct Location {
     /// Keep alive mode.
     #[serde(default = "KeepAlive::default")]
     keep_alive: KeepAlive,
+    // TODO: ban list.
+
+    /*
+    #[serde(default)]
+    r#return: Option<ReturnCode>,
+
+    ban_client_addrs: Vec<SocketAddr>,  // This override the return code ^
+    ban_header_names: Vec<HeaderName>,
+    ban_header_values: Vec<HeaderValue>,
+
+     */
 }
 
 impl Location {
@@ -44,21 +53,26 @@ impl Location {
 
 #[derive(Debug, Deserialize, Clone)]
 pub enum PathPattern {
-    /// Match all path, this will always return true for any path.
+    /// Match all paths, this will always return true for any path.
     All,
 
     /// Match path if it starts with a string.
     Prefix(String),
 
+    /// Like `Prefix` but match path starts with any of those strings.
+    PrefixAny(Vec<String>),
+
     /// Match path if it ends with a string.
     Suffix(String),
+
+    /// Like `Suffix` but match path ends with any of those strings.
+    SuffixAny(Vec<String>),
 
     /// Match exact path.<br />
     /// TODO: is trailing slash ok?
     Exact(String),
 
-    /// Consider if regex should always start at 0 or depend on user to define.<br />
-    /// TODO: is it more error prone/easy to forget to put caret in the beginning of regex?
+    /// Math path using regular expression.
     #[serde(deserialize_with = "PathPattern::deserialize_regex")]
     Regex(Regex),
 }
@@ -73,12 +87,13 @@ impl PathPattern {
         Regex::new(regex_str).map_err(D::Error::custom)
     }
 
-    #[allow(dead_code)]
     pub fn match_against(&self, path: UriPath<'_>) -> bool {
         match self {
             PathPattern::All => true,
             PathPattern::Prefix(p) => path.starts_with(p),
+            PathPattern::PrefixAny(vp) => vp.iter().any(|p| path.starts_with(p)),
             PathPattern::Suffix(p) => path.ends_with(p),
+            PathPattern::SuffixAny(vp) => vp.iter().any(|p| path.ends_with(p)),
             PathPattern::Exact(p) => path == p,
             PathPattern::Regex(reg) => reg.is_match(path),
         }
@@ -97,7 +112,6 @@ impl ServeMode {
         Self::Files("./www".into())
     }
 
-    #[allow(dead_code)]
     pub fn get_file_path(&self, path: UriPath<'_>) -> Option<PathBuf> {
         match self {
             ServeMode::Files(ref root) => {
