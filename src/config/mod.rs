@@ -72,8 +72,8 @@ impl Scheme {
 
 pub const DEFAULT_ADDR: &'static str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 8000;
-pub const DEFAULT_TASKS_PER_WORKER: u32 = 300_000;
-pub const DEFAULT_MAX_CONNECTION_IN_WAITING: usize = 5000;
+pub const DEFAULT_TASKS_PER_WORKER: u32 = 500;
+pub const DEFAULT_MAX_CONNECTION_IN_WAITING: usize = 100;
 
 pub const fn default_port() -> u16 {
     DEFAULT_PORT

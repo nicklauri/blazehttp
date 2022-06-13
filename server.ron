@@ -1,12 +1,7 @@
 (
-    port: 8080,
-    scheme: https,
-    pattern: [
-        (
-            pattern: All,
-            headers: [
-                ("server", "blazeHTTP 1.1")
-            ]
-        ),
-    ],
+    port: 8000,
+    scheme: http,
+    max_tasks_per_worker: 5000,
+    max_connections_in_waiting: 5000,
+    display_statistics_on_shutdown: true,
 )

@@ -1,6 +1,6 @@
 use std::{mem::MaybeUninit, net::SocketAddr, rc::Rc};
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use http::{
     header::{HeaderName, CONTENT_LENGTH, EXPECT, TRANSFER_ENCODING},
     HeaderMap, HeaderValue, Method, Uri, Version,
@@ -16,7 +16,14 @@ use crate::{
 };
 
 use super::{body::HttpBody, Request};
+const DATA: &[u8] = b"\
+HTTP/1.1 200 OK
+content-type: text/plain; charset=utf-8
+content-length: 12
 
+Hello World!";
+
+/// TODO: include notify for shutting down current (worker) connection.
 #[derive(Debug)]
 pub struct H1Connection {
     stream: TcpStream,
@@ -39,38 +46,44 @@ impl H1Connection {
 
     pub async fn handle_connection(mut self) {
         let mut buf = Buf::with_capacity(8 * 1024);
-        const DATA: &[u8] = b"HTTP/1.1 200 OK\ncontent-length: 12\r\n\r\nHello, world";
-        loop {
+
+        let error = loop {
             // Note: should handle every errors then send appropriate error page.
             let request = match self.read_request(&mut buf).await {
                 Ok(request) => request,
-                Err(_err) => {
-                    break;
+                Err(err) => {
+                    break err;
                 }
             };
 
             match self.info.fill_info(&request) {
                 Ok(_) => {}
-                Err(_error) => {
+                Err(err) => {
                     warn!("fill_info error");
-                    break;
+                    break err;
                 }
             };
 
             match self.stream.write_all(DATA).await {
                 Ok(_m) => {}
-                Err(_error) => {
-                    break;
+                Err(err) => {
+                    break BlazeError::Other(err.into());
                 }
             };
+        };
+
+        if !error.is_client_close_stream() {
+            warn!(?error, "handle_connection");
         }
+
+        debug!(client = ?self.addr, "close stream");
 
         if let Err(err) = self.stream.shutdown().await {
             debug!("stream.shutdown() error: {:?}", err);
         }
     }
 
-    pub async fn read_request(&mut self, buf: &mut Buf) -> Result<Request> {
+    pub async fn read_request(&mut self, buf: &mut Buf) -> BlazeResult<Request> {
         if buf.is_empty() {
             buf.fill(&mut self.stream).await?;
         }
@@ -85,7 +98,7 @@ impl H1Connection {
                     if buf.is_full() {
                         // The buff is fulled but header is still incomplete.
                         debug!("read_request: header is too large");
-                        bail!(BlazeError::RequestHeaderTooLarge)
+                        err!(BlazeError::RequestHeaderTooLarge)
                     }
 
                     debug!("read_request: parse header partial (already read: {} bytes)", buf.filled_size());
@@ -94,7 +107,7 @@ impl H1Connection {
                             debug!("read_request: eof");
                         }
 
-                        bail!(err)
+                        err!(err)
                     }
 
                     continue;

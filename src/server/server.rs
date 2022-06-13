@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::{
+    ops::ControlFlow,
+    sync::atomic::{AtomicU8, Ordering},
+};
 
 use anyhow::{Error, Result};
 use tokio::{net::TcpListener, select};
@@ -58,14 +61,18 @@ impl Server {
         let spawner = self.runtime.spawner();
         let result = self.runtime.run(async move {
             let server = TcpListener::bind(&server_addr).await?;
-
+            let mut c = 0;
             info!("listen on {}://{}", scheme, server_addr);
             // TODO: handle tcp/http, tls/http, h2
             // Note: tls/http and h2 can be on the same TcpListener, but tcp/http can't.
             // Currently, blazehttp can only handle tcp/http.
             loop {
                 select! {
-                    _ = Server::accept_connection_h1(&server, &spawner) => {}
+                    res = Server::accept_connection_h1(&server, &spawner, &mut c) => {
+                        if res.is_break() {
+                            break;
+                        }
+                    }
                     res = tokio::signal::ctrl_c() => {
                         if let Err(err) = res {
                             warn!("await CTRL-C signal error: {err:#?}");
@@ -74,6 +81,8 @@ impl Server {
                     }
                 }
             }
+
+            info!("total connections accepted: {}", c);
 
             Ok::<_, Error>(())
         });
@@ -90,7 +99,7 @@ impl Server {
     }
 
     #[inline]
-    async fn accept_connection_h1(server: &TcpListener, spawner: &Spawner) {
+    async fn accept_connection_h1(server: &TcpListener, spawner: &Spawner, c: &mut usize) -> ControlFlow<()> {
         match server.accept().await {
             Ok((stream, addr)) => {
                 debug!(?addr, "server.accept");
@@ -107,7 +116,18 @@ impl Server {
             Err(err) => {
                 warn!("server.accept: {err:#?}");
                 info!("spawner.pending_task_count: {}", spawner.pending_task_count());
+
+                if std::io::Error::from_raw_os_error(24).kind() == err.kind() {
+                    error!("too many files opened");
+                }
+
+                return ControlFlow::Break(());
             }
         }
+
+        // TODO: REMOVE DEBUG
+        *c += 1;
+
+        ControlFlow::Continue(())
     }
 }

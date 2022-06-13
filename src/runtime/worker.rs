@@ -30,6 +30,12 @@ thread_local! {
     static TASK_COUNTER: RefCell<u32> = RefCell::new(0);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkerShutdownType {
+    Graceful,
+    Forced,
+}
+
 pub enum Command {
     H1(proto::Connection),
     Task(Task),
@@ -72,10 +78,18 @@ impl Worker {
 
             WorkerInner::on_thread_start(id, config.clone());
 
-            rt.block_on(fut);
-            rt.block_on(localset); // Drain all tasks in the set.
+            let shutdown_type = rt.block_on(fut);
+
+            if matches!(shutdown_type, WorkerShutdownType::Graceful) {
+                debug!("worker[{:>2}]: shutdown gracefully", id);
+                rt.block_on(localset); // Drain all tasks in the set.
+            } else {
+                debug!("worker[{:>2}]: forcing shutdown", id);
+            }
 
             WorkerInner::on_thread_stop(id, config);
+
+            debug!("worker[{:>2}]: worker is exitting", id);
 
             Ok(())
         });
@@ -141,12 +155,12 @@ impl WorkerInner {
         ControlFlow::Continue(())
     }
 
-    async fn run(self) {
+    async fn run(self) -> WorkerShutdownType {
         let err = loop {
             select! {
                 _ = self.shutdown.notified() => {
                     debug!("worker[{:>2}]: shutting down", self.id);
-                    return;
+                    return WorkerShutdownType::Forced;
                 }
 
                 res = self.handle_task() => {
@@ -154,8 +168,8 @@ impl WorkerInner {
                         ControlFlow::Continue(_) => continue,
                         ControlFlow::Break(result) => match result {
                             Ok(()) => {
-                                // debug!("worker[{:>2}]: peacefully shutdown", self.id);
-                                return
+                                debug!("worker[{:>2}]: peacefully shutdown", self.id);
+                                return WorkerShutdownType::Graceful;
                             },
                             Err(err) => break err,
                         }
@@ -165,6 +179,7 @@ impl WorkerInner {
         };
 
         debug!("worker[{:>2}]: worker stopped with error: {err:#?}", self.id);
+        WorkerShutdownType::Forced
     }
 
     #[inline]

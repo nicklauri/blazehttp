@@ -2,14 +2,14 @@ pub mod worker;
 
 use std::{future::Future, mem, rc::Rc, sync::Arc};
 
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Result};
 use async_channel::{Receiver, Sender};
 use tokio::{
     runtime::{Builder, Runtime},
     sync::Notify as TokioNotify,
     task::JoinHandle as TokioJoinHandle,
 };
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use crate::{config::Config, err, error::BlazeRuntimeError};
 
@@ -88,20 +88,24 @@ impl BlazeRuntime {
     pub fn graceful_shutdown(&mut self) -> Result<(), BlazeRuntimeError> {
         err!(self.workers.is_empty(), BlazeRuntimeError::WorkerStopped);
 
-        let number_of_workers = self.workers.len();
-        let spawner = self.spawner();
+        // let number_of_workers = self.workers.len();
+        // let spawner = self.spawner();
 
-        let res = self.run(async move {
-            debug!(number_of_workers = ?number_of_workers, "sending stop command to workers");
-            for _ in 0..number_of_workers {
-                spawner.send_command(Command::Stop).await?;
-            }
-            Ok::<_, Error>(())
-        });
+        // // Doesn't distribute fairly, so some will be shutdown by command, some shutdown by notification.
+        // let res = self.run(async move {
+        //     debug!(number_of_workers = ?number_of_workers, "sending stop command to workers");
+        //     for _ in 0..number_of_workers {
+        //         spawner.send_command(Command::Stop).await?;
+        //     }
 
-        if let Err(err) = res {
-            error!("send shutdown signal to workers: {err:?}");
-        }
+        //     Ok::<_, Error>(())
+        // });
+
+        // if let Err(err) = res {
+        //     error!("send shutdown signal to workers: {err:?}");
+        // }
+
+        self.shutdown_notify.notify_waiters();
 
         debug!("join with worker threads: {} worker(s)", self.workers.len());
         let workers = mem::take(&mut self.workers);

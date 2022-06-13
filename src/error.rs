@@ -92,6 +92,11 @@ impl BlazeError {
     pub fn is_eof(&self) -> bool {
         matches!(*self, BlazeError::Eof)
     }
+
+    #[inline]
+    pub fn is_client_close_stream(&self) -> bool {
+        matches!(*self, BlazeError::Eof)
+    }
 }
 
 pub type BlazeResult<T> = Result<T, BlazeError>;
