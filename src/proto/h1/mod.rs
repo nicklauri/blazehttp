@@ -48,11 +48,10 @@ impl H1Connection {
         let mut buf = Buf::with_capacity(8 * 1024);
 
         let error = loop {
-            // Note: should handle every errors then send appropriate error page.
             let request = match self.read_request(&mut buf).await {
                 Ok(request) => request,
                 Err(err) => {
-                    break err;
+                    break Err(err);
                 }
             };
 
@@ -60,27 +59,39 @@ impl H1Connection {
                 Ok(_) => {}
                 Err(err) => {
                     warn!("fill_info error");
-                    break err;
+                    break Err(err);
                 }
             };
 
             match self.stream.write_all(DATA).await {
-                Ok(_m) => {}
+                Ok(_) => {}
                 Err(err) => {
-                    break BlazeError::Other(err.into());
+                    break Err(BlazeError::Other(err.into()));
                 }
             };
+
+            // TODO: await for broadcast channel to signal shutdown then shutdown this gracefully or forcefully.
+            if false {
+                break Ok(());
+            }
         };
 
-        if !error.is_client_close_stream() {
-            warn!(?error, "handle_connection");
+        if let Err(err) = error {
+            if !err.is_client_close_stream() {
+                // Silently close the connection without sending any response.
+                warn!(?err, "handle_connection");
+            } else {
+                self.try_send_error_response(err).await;
+            }
         }
 
-        debug!(client = ?self.addr, "close stream");
+        debug!(client.addr = ?self.addr, "close stream");
 
         if let Err(err) = self.stream.shutdown().await {
-            debug!("stream.shutdown() error: {:?}", err);
+            debug!("stream.shutdown: error: {:?}", err);
         }
+
+        drop(self.stream);
     }
 
     pub async fn read_request(&mut self, buf: &mut Buf) -> BlazeResult<Request> {
@@ -124,6 +135,10 @@ impl H1Connection {
             return Ok(request);
         }
     }
+
+    /// Send appropriate reponse to client based on the error.
+    /// This method should handle errors even when writing out the response.
+    pub async fn try_send_error_response(&mut self, _error: BlazeError) {}
 }
 
 fn map_to_http_request(hreq: &HttparseRequest) -> Result<Request> {

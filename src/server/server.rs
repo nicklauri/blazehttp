@@ -70,7 +70,7 @@ impl Server {
                 select! {
                     res = Server::accept_connection_h1(&server, &spawner, &mut c) => {
                         if res.is_break() {
-                            break;
+                            // break;
                         }
                     }
                     res = tokio::signal::ctrl_c() => {
@@ -114,6 +114,9 @@ impl Server {
                 }
             }
             Err(err) => {
+                // TODO:
+                //      1. If it's connection error, continue,
+                //      2. If other kind of error, try to sleep 500ms (maybe), then continue.
                 warn!("server.accept: {err:#?}");
                 info!("spawner.pending_task_count: {}", spawner.pending_task_count());
 

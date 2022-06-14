@@ -10,7 +10,7 @@ use std::{
 
 use tokio::time;
 
-/// Notify single task.
+/// Notify single task, the relationship is: many notifier and one notify waiter.
 /// Simple notify mechanism for async current thread. `Notify` is `!Send` and `!Sync`.
 /// Notify will call `notify.notified().await` to  listen for notifications.<br />
 /// This implementation is very cheap to create, clone and await.<br />

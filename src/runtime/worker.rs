@@ -89,7 +89,7 @@ impl Worker {
 
             WorkerInner::on_thread_stop(id, config);
 
-            debug!("worker[{:>2}]: worker is exitting", id);
+            // debug!("worker[{:>2}]: worker is exitting", id);
 
             Ok(())
         });

@@ -1,7 +1,8 @@
 (
+    addr: "127.0.0.1",
     port: 8000,
     scheme: http,
-    max_tasks_per_worker: 5000,
-    max_connections_in_waiting: 5000,
+    max_tasks_per_worker: 500,
+    max_connections_in_waiting: 500,
     display_statistics_on_shutdown: true,
 )
