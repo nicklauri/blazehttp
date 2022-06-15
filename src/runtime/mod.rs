@@ -73,10 +73,10 @@ impl BlazeRuntime {
 
     /// Block current thread and run the task.
     #[inline]
-    pub fn run<F>(&self, task: F) -> Result<F::Output, BlazeRuntimeError>
+    pub fn run<'rt, F>(&'rt self, task: F) -> Result<F::Output, BlazeRuntimeError>
     where
-        F: Future + 'static,
-        F::Output: 'static,
+        F: Future + 'rt,
+        F::Output: 'rt,
     {
         err!(self.workers.is_empty(), BlazeRuntimeError::RuntimeStopped);
 

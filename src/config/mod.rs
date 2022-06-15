@@ -1,8 +1,8 @@
 pub mod path;
 
-use std::fmt::Display;
+use std::{fmt::Display, time::Duration};
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use self::path::Location;
 
@@ -31,6 +31,9 @@ pub struct Config {
 
     #[serde(default)]
     pub display_statistics_on_shutdown: bool,
+
+    #[serde(default = "default_accept_error_sleep", deserialize_with = "Config::deserialize_duration")]
+    pub accept_error_sleep: Duration,
 }
 
 impl Config {
@@ -44,7 +47,17 @@ impl Config {
             max_tasks_per_worker: default_tasks_per_worker(),
             max_connections_in_waiting: default_max_connections_in_waiting(),
             display_statistics_on_shutdown: Default::default(),
+            accept_error_sleep: default_accept_error_sleep(),
         }
+    }
+
+    pub fn deserialize_duration<'de, D>(de: D) -> Result<Duration, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let ms: u64 = Deserialize::deserialize(de)?;
+
+        Ok(Duration::from_millis(ms))
     }
 }
 
@@ -74,6 +87,7 @@ pub const DEFAULT_ADDR: &'static str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 8000;
 pub const DEFAULT_TASKS_PER_WORKER: u32 = 500;
 pub const DEFAULT_MAX_CONNECTION_IN_WAITING: usize = 100;
+pub const DEFAULT_ACCEPT_ERROR_SLEEP: Duration = Duration::from_millis(200);
 
 pub const fn default_port() -> u16 {
     DEFAULT_PORT
@@ -87,10 +101,14 @@ pub fn default_addr() -> String {
     DEFAULT_ADDR.to_string()
 }
 
-pub fn default_tasks_per_worker() -> u32 {
+pub const fn default_tasks_per_worker() -> u32 {
     DEFAULT_TASKS_PER_WORKER
 }
 
-pub fn default_max_connections_in_waiting() -> usize {
+pub const fn default_max_connections_in_waiting() -> usize {
     DEFAULT_MAX_CONNECTION_IN_WAITING
+}
+
+pub const fn default_accept_error_sleep() -> Duration {
+    DEFAULT_ACCEPT_ERROR_SLEEP
 }

@@ -6,7 +6,7 @@ use http::{
     HeaderMap, HeaderValue, Method, Uri, Version,
 };
 use httparse::{Header, Request as HttparseRequest, Status};
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use tokio::{io::AsyncWriteExt, net::TcpStream, task};
 use tracing::{debug, warn};
 
 use crate::{config::Config, err, error::BlazeResult, ok, util::buf::Buf};
@@ -70,6 +70,9 @@ impl H1Connection {
                 }
             };
 
+            // Yield to let the scheduler to poll other tasks.
+            task::yield_now().await;
+
             // TODO: await for broadcast channel to signal shutdown then shutdown this gracefully or forcefully.
             if false {
                 break Ok(());
@@ -79,7 +82,7 @@ impl H1Connection {
         if let Err(err) = error {
             if !err.is_client_close_stream() {
                 // Silently close the connection without sending any response.
-                warn!(?err, "handle_connection");
+                warn!("handle_connection: {err:#?}");
             } else {
                 self.try_send_error_response(err).await;
             }
@@ -87,8 +90,9 @@ impl H1Connection {
 
         debug!(client.addr = ?self.addr, "close stream");
 
-        if let Err(err) = self.stream.shutdown().await {
-            debug!("stream.shutdown: error: {:?}", err);
+        if let Err(_err) = self.stream.shutdown().await {
+            // Ignore this.
+            // debug!("stream.shutdown: error: {:?}", err);
         }
 
         drop(self.stream);

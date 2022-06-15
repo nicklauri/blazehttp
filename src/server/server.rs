@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{Error, Result};
-use tokio::{net::TcpListener, select};
+use tokio::{net::TcpListener, select, time};
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -59,30 +59,24 @@ impl Server {
         self.register_ctrl_c();
 
         let spawner = self.runtime.spawner();
-        let result = self.runtime.run(async move {
+        let result = self.runtime.run(async {
             let server = TcpListener::bind(&server_addr).await?;
-            let mut c = 0;
+            let mut total_conns = 0;
             info!("listen on {}://{}", scheme, server_addr);
             // TODO: handle tcp/http, tls/http, h2
             // Note: tls/http and h2 can be on the same TcpListener, but tcp/http can't.
             // Currently, blazehttp can only handle tcp/http.
+
             loop {
                 select! {
-                    res = Server::accept_connection_h1(&server, &spawner, &mut c) => {
-                        if res.is_break() {
-                            // break;
-                        }
-                    }
-                    res = tokio::signal::ctrl_c() => {
-                        if let Err(err) = res {
-                            warn!("await CTRL-C signal error: {err:#?}");
-                        }
-                        break
-                    }
+                    _ = self.accept_connection_h1(&server, &spawner, &mut total_conns) => { }
+                    _ = tokio::signal::ctrl_c() => { break }
                 }
             }
 
-            info!("total connections accepted: {}", c);
+            if self.config.display_statistics_on_shutdown {
+                info!("total connections accepted: {}", total_conns);
+            }
 
             Ok::<_, Error>(())
         });
@@ -99,7 +93,7 @@ impl Server {
     }
 
     #[inline]
-    async fn accept_connection_h1(server: &TcpListener, spawner: &Spawner, c: &mut usize) -> ControlFlow<()> {
+    async fn accept_connection_h1(&self, server: &TcpListener, spawner: &Spawner, total_conn: &mut usize) -> ControlFlow<()> {
         match server.accept().await {
             Ok((stream, addr)) => {
                 debug!(?addr, "server.accept");
@@ -114,22 +108,18 @@ impl Server {
                 }
             }
             Err(err) => {
-                // TODO:
-                //      1. If it's connection error, continue,
-                //      2. If other kind of error, try to sleep 500ms (maybe), then continue.
-                warn!("server.accept: {err:#?}");
-                info!("spawner.pending_task_count: {}", spawner.pending_task_count());
-
                 if std::io::Error::from_raw_os_error(24).kind() == err.kind() {
-                    error!("too many files opened");
+                    warn!(
+                        sleep = ?self.config.accept_error_sleep,
+                        spawner.pending_task_count = spawner.pending_task_count(),
+                        "too many open files",
+                    );
                 }
-
-                return ControlFlow::Break(());
+                time::sleep(self.config.accept_error_sleep).await;
             }
         }
 
-        // TODO: REMOVE DEBUG
-        *c += 1;
+        *total_conn += 1;
 
         ControlFlow::Continue(())
     }

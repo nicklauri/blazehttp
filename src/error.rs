@@ -66,6 +66,9 @@ pub enum BlazeError {
     #[error("Payload too large")]
     PayloadTooLarge,
 
+    #[error("Client closed connection")]
+    ClientClosedStream,
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -95,7 +98,7 @@ impl BlazeError {
 
     #[inline]
     pub fn is_client_close_stream(&self) -> bool {
-        matches!(*self, BlazeError::Eof)
+        matches!(*self, BlazeError::Eof | BlazeError::ClientClosedStream)
     }
 }
 
@@ -105,7 +108,10 @@ impl From<io::Error> for BlazeError {
     #[inline]
     fn from(err: io::Error) -> Self {
         // TODO: check and conver error from IO
-        BlazeError::Other(err.into())
+        match err.kind() {
+            io::ErrorKind::ConnectionReset => BlazeError::ClientClosedStream,
+            _ => BlazeError::Other(err.into()),
+        }
     }
 }
 
