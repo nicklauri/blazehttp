@@ -22,5 +22,19 @@ macro_rules! ok {
     };
 }
 
+#[macro_export]
+macro_rules! try_break {
+    ($e:expr) => {
+        match $e {
+            std::convert::ControlFlow::Continue(()) => {}
+            std::convert::ControlFlow::Break(result) => {
+                result?;
+                break;
+            }
+        }
+    };
+}
+
 pub use err;
 pub use ok;
+pub use try_break;

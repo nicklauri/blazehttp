@@ -248,18 +248,25 @@ impl H1ConnInfo {
         self.content_length = BodyLen::Empty;
 
         let headers = req.headers();
+
+        // Note: may we should check all the headers, because client may send many "content-length" and "transfer-encoding" headers at the same time,
+        // and they may contain different values.
+
         // Check transfer-encoding as well.
         if let Some(te) = headers.get(TRANSFER_ENCODING) {
             let is_chunked = te.as_bytes().eq_ignore_ascii_case(b"chunked");
             if is_chunked {
                 self.content_length = BodyLen::Chunked;
             } else {
+                // TODO
             }
         }
 
         if let Some(lenstr) = headers.get(CONTENT_LENGTH) {
             if self.content_length.is_chunked() {
-                // Do something here, because of the conflict.
+                // Conflicted, bad request.
+                // TODO: maybe handle something more?
+                return Err(BlazeError::BadRequest);
             }
 
             let len = lenstr
