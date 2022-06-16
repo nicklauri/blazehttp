@@ -5,6 +5,7 @@ use std::{
     future::Future,
     ops::ControlFlow,
     pin::Pin,
+    process,
     rc::Rc,
     thread::{self, JoinHandle},
 };
@@ -13,7 +14,7 @@ use tokio::{
     select,
     task::{self, JoinHandle as TokioJoinHandle, LocalSet},
 };
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use crate::{
     config::Config,
@@ -37,8 +38,15 @@ pub enum WorkerShutdownType {
 }
 
 pub enum Command {
+    /// Spawn an HTTP/1.1 connection.<br />
+    /// This is like hard-coding, but it's okay since the sole purpose of
+    /// this project is to make a static HTTP server, not a web framework.
     H1(proto::Connection),
+
+    /// Run the lambda to get the future then execute it in the local executor.
     Task(Task),
+
+    /// Signal the worker to stop
     Stop,
 }
 
@@ -66,11 +74,8 @@ impl Worker {
     }
 
     fn spawn_thread(id: usize, rx: Receiver<Command>, config: Config, shutdown: ShutdownNotity) -> JoinHandle<Result<()>> {
-        let handle = thread::spawn(move || {
-            let rt = Builder::new_current_thread()
-                .enable_all()
-                .thread_name(format!("blaze-worker:{}", id))
-                .build()?;
+        let result = thread::Builder::new().name(format!("blaze-worker:{}", id)).spawn(move || {
+            let rt = Builder::new_current_thread().enable_all().build()?;
 
             let localset = LocalSet::new();
             let config = Rc::new(config);
@@ -94,7 +99,13 @@ impl Worker {
             Ok(())
         });
 
-        handle
+        match result {
+            Ok(handle) => handle,
+            Err(err) => {
+                error!("spawn thread for worker-{id} error: {err:#?}");
+                process::exit(1);
+            }
+        }
     }
 }
 

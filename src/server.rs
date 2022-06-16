@@ -10,7 +10,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     config::Config,
     proto,
-    runtime::{BlazeRuntime, Spawner},
+    runtime::{BlazeRuntime, Command, Spawner},
 };
 
 pub struct Server {
@@ -69,7 +69,7 @@ impl Server {
 
             loop {
                 select! {
-                    _ = self.accept_connection_h1(&server, &spawner, &mut total_conns) => { }
+                    _ = self.accept_http_connection(&server, &spawner, &mut total_conns) => { }
                     _ = tokio::signal::ctrl_c() => { break }
                 }
             }
@@ -93,15 +93,13 @@ impl Server {
     }
 
     #[inline]
-    async fn accept_connection_h1(&self, server: &TcpListener, spawner: &Spawner, total_conn: &mut usize) -> ControlFlow<()> {
+    async fn accept_http_connection(&self, server: &TcpListener, spawner: &Spawner, total_conn: &mut usize) -> ControlFlow<()> {
         match server.accept().await {
             Ok((stream, addr)) => {
                 debug!(?addr, "server.accept");
 
                 let conn = proto::Connection::new(stream, addr);
-                let result = spawner
-                    .spawn_task(move |config| proto::handle_h1_connection(conn, config))
-                    .await;
+                let result = spawner.send_command(Command::H1(conn)).await;
 
                 if let Err(err) = result {
                     warn!(?err, "spawner.spawn_task");

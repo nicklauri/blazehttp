@@ -85,9 +85,9 @@ impl Scheme {
 
 pub const DEFAULT_ADDR: &'static str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 8000;
-pub const DEFAULT_TASKS_PER_WORKER: u32 = 500;
-pub const DEFAULT_MAX_CONNECTION_IN_WAITING: usize = 100;
-pub const DEFAULT_ACCEPT_ERROR_SLEEP: Duration = Duration::from_millis(200);
+pub const DEFAULT_TASKS_PER_WORKER: u32 = 100;
+pub const DEFAULT_MAX_CONNECTION_IN_WAITING: usize = 1;
+pub const DEFAULT_ACCEPT_ERROR_SLEEP: Duration = Duration::from_millis(500);
 
 pub const fn default_port() -> u16 {
     DEFAULT_PORT
@@ -102,10 +102,12 @@ pub fn default_addr() -> String {
 }
 
 pub const fn default_tasks_per_worker() -> u32 {
+    // TODO: calculate based on ulimit.
     DEFAULT_TASKS_PER_WORKER
 }
 
 pub const fn default_max_connections_in_waiting() -> usize {
+    // TODO: calculate based on ulimit.
     DEFAULT_MAX_CONNECTION_IN_WAITING
 }
 

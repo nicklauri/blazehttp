@@ -4,7 +4,7 @@ use std::env;
 
 use anyhow::Result;
 
-use crate::{config::Config, server::server::Server};
+use crate::{config::Config, server::Server};
 
 mod config;
 mod error;
